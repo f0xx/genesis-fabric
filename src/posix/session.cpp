@@ -25,6 +25,10 @@ struct FileIO {
     bool writing = false;
     bool nospace = false;
     const char* path = nullptr;
+    char path_keep[512]{};
+    char name_keep[256]{};
+    uint64_t file_size = 0;
+    uint64_t durable = 0;
     uint64_t since_flush = 0;
 };
 
@@ -45,28 +49,38 @@ bool reserve_file(FILE* f, uint64_t from, uint64_t size) {
     return false;
 }
 
-void write_sidecar(const char* path, const char* name, uint64_t size) {
+#ifndef SEEK_HOLE
+#define SEEK_HOLE 4
+#endif
+
+void write_sidecar(const char* path, const char* name, uint64_t size, uint64_t durable) {
     char side[540];
     if (std::snprintf(side, sizeof(side), "%s.genesis", path) >= static_cast<int>(sizeof(side))) return;
     FILE* s = std::fopen(side, "w");
     if (!s) return;
-    std::fprintf(s, "%s\n%llu\n", name ? name : "", static_cast<unsigned long long>(size));
+    std::fprintf(s, "%s\n%llu\n%llu\n", name ? name : "", static_cast<unsigned long long>(size),
+                 static_cast<unsigned long long>(durable));
     std::fclose(s);
 }
 
-bool sidecar_match(const char* path, const char* name, uint64_t size) {
+bool sidecar_match(const char* path, const char* name, uint64_t size, uint64_t* durable) {
+    if (durable) *durable = ~uint64_t{0};
     char side[540];
     if (std::snprintf(side, sizeof(side), "%s.genesis", path) >= static_cast<int>(sizeof(side))) return false;
     FILE* s = std::fopen(side, "r");
     if (!s) return false;
     char line[256];
     unsigned long long sz = 0;
+    unsigned long long dur = 0;
     bool ok = std::fgets(line, sizeof(line), s) != nullptr && std::fscanf(s, "%llu", &sz) == 1;
+    bool have_dur = ok && std::fscanf(s, "%llu", &dur) == 1;
     std::fclose(s);
     if (!ok) return false;
     size_t n = std::strlen(line);
     if (n && line[n - 1] == '\n') line[n - 1] = '\0';
-    return std::strcmp(line, name ? name : "") == 0 && sz == size;
+    if (std::strcmp(line, name ? name : "") != 0 || sz != size) return false;
+    if (have_dur && durable) *durable = dur;
+    return true;
 }
 
 uint64_t open_resume(FileIO* io, const char* path, const char* name, uint64_t file_size, int align, ResumeAbsorb absorb,
@@ -78,11 +92,32 @@ uint64_t open_resume(FileIO* io, const char* path, const char* name, uint64_t fi
     }
     uint64_t off = 0;
     struct stat st;
-    if (align > 0 && file_size && sidecar_match(path, name, file_size) && ::stat(path, &st) == 0 && S_ISREG(st.st_mode) &&
-        st.st_size > 0) {
-        off = static_cast<uint64_t>(st.st_size);
-        if (off > file_size) off = 0;
-        else off -= off % static_cast<uint64_t>(align);
+    uint64_t saved = ~uint64_t{0};
+    if (align > 0 && file_size && sidecar_match(path, name, file_size, &saved) && ::stat(path, &st) == 0 &&
+        S_ISREG(st.st_mode) && st.st_size > 0) {
+        /* ftruncate sets st_size to the whole file before the bytes exist.
+         * The sidecar's durable count is the prefix that was flushed. An older
+         * sidecar has no count; the first hole is the same boundary. */
+        if (saved != ~uint64_t{0} && saved <= file_size) off = saved;
+        else {
+            off = static_cast<uint64_t>(st.st_size);
+            if (off > file_size) off = file_size;
+            int fd = ::open(path, O_RDONLY);
+            if (fd >= 0) {
+                off_t hole = ::lseek(fd, 0, SEEK_HOLE);
+                if (hole > 0 && static_cast<uint64_t>(hole) < off) off = static_cast<uint64_t>(hole);
+                ::close(fd);
+            }
+            /* The last allocated block can contain a short write followed by
+             * zeros. A fully allocated file is the whole object. */
+            bool dense = static_cast<uint64_t>(st.st_blocks) * 512ull >= static_cast<uint64_t>(st.st_size);
+            if (!(dense && off >= file_size)) {
+                uint64_t blk = st.st_blksize > 0 ? static_cast<uint64_t>(st.st_blksize) : 4096ull;
+                if (off > blk) off -= blk;
+                else off = 0;
+            }
+        }
+        off -= off % static_cast<uint64_t>(align);
     }
     io->f = std::fopen(path, off ? "r+b" : "wb");
     if (!io->f) return 0;
@@ -109,7 +144,12 @@ uint64_t open_resume(FileIO* io, const char* path, const char* name, uint64_t fi
         io->nospace = true;
     }
     if (io->f && off) ::fseeko(io->f, static_cast<off_t>(off), SEEK_SET);
-    if (io->f) write_sidecar(path, name, file_size);
+    if (path) std::snprintf(io->path_keep, sizeof(io->path_keep), "%s", path);
+    if (name) std::snprintf(io->name_keep, sizeof(io->name_keep), "%s", name);
+    io->path = io->path_keep;
+    io->file_size = file_size;
+    io->durable = off;
+    if (io->f) write_sidecar(io->path_keep, io->name_keep, file_size, off);
     if (off) logf(1, "resume %s at %llu/%llu", path, static_cast<unsigned long long>(off),
                   static_cast<unsigned long long>(file_size));
     return off;
@@ -131,7 +171,9 @@ int file_write(void* u, const uint8_t* d, int n) {
     io->since_flush += static_cast<uint64_t>(n);
     if (io->f != stdout && io->since_flush >= 256ull * 1024ull) {
         std::fflush(io->f);
+        io->durable += io->since_flush;
         io->since_flush = 0;
+        if (io->path_keep[0]) write_sidecar(io->path_keep, io->name_keep, io->file_size, io->durable);
     }
     return n;
 }

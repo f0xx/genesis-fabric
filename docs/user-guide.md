@@ -33,7 +33,7 @@ Progress is one line on standard error: a bar, percent, bytes, effective rate, a
 
 ## Resume
 
-If a receive is interrupted, the bytes already flushed and a sidecar `FILE.genesis` (the sender's file name and size) let the next run continue. The receiver tells the sender the largest chunk-aligned prefix still on disk. The sender reads and hashes that prefix, both sides cover it in the final digest, and the rest of the file is the only thing on the wire. A different name or size starts over. Delete the destination and the sidecar to force a full copy. When the file size is known, the receiver `ftruncate`s it to that size. `posix_fallocate` reserves the unwritten tail when it is at most 1 GiB, so a full disk fails at the start on filesystems that support the call. Larger files stay sparse. Standard output is never preallocated.
+If a receive is interrupted, the bytes already flushed and a sidecar `FILE.genesis` (the sender's file name and size) let the next run continue. The receiver tells the sender the largest chunk-aligned prefix that was actually flushed. The preallocated tail does not count. The sender reads and hashes that prefix, both sides cover it in the final digest, and the rest of the file is the only thing on the wire. A different name or size starts over. Delete the destination and the sidecar to force a full copy. When the file size is known, the receiver `ftruncate`s it to that size. `posix_fallocate` reserves the unwritten tail when it is at most 1 GiB, so a full disk fails at the start on filesystems that support the call. Larger files stay sparse. Standard output is never preallocated.
 
 ## Talking to genesisd
 
