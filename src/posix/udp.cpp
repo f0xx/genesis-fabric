@@ -6,12 +6,12 @@
 
 #include <arpa/inet.h>
 #include <cerrno>
+#include <poll.h>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <poll.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
@@ -120,8 +120,23 @@ bool UdpSocket::send_to(const uint8_t* data, size_t len, uint32_t addr_host, uin
     to.sin_family = AF_INET;
     to.sin_port = htons(port);
     to.sin_addr.s_addr = htonl(addr_host);
-    ssize_t n = ::sendto(fd_, data, len, 0, reinterpret_cast<sockaddr*>(&to), sizeof(to));
-    return n == static_cast<ssize_t>(len);
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        ssize_t n = ::sendto(fd_, data, len, 0, reinterpret_cast<sockaddr*>(&to), sizeof(to));
+        if (n == static_cast<ssize_t>(len)) return true;
+        if (n < 0 && errno == EINTR) {
+            --attempt;
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS)) {
+            pollfd pfd{};
+            pfd.fd = fd_;
+            pfd.events = POLLOUT;
+            if (::poll(&pfd, 1, 2) < 0 && errno == EINTR) --attempt;
+            continue;
+        }
+        return false;
+    }
+    return false;
 }
 
 int UdpSocket::send_batch(const uint8_t* const* data, const size_t* lens, const uint32_t* addrs, const uint16_t* ports,

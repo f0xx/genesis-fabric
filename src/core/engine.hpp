@@ -66,6 +66,8 @@ public:
     void on_datagram(const uint8_t* data, size_t len, Endpoint from, uint64_t now_us);
     void tick(uint64_t now_us);
     bool pop(DatagramOut& out);
+    /* Put a datagram back after the socket refused it. Valid after pop(). */
+    void push_front(const DatagramOut& out);
     bool done() const;
     bool success() const;
     const char* error() const;

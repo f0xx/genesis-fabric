@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 namespace genesis {
+void flush_socket(Engine& eng, UdpSocket& sock);
 namespace {
 
 struct FileIO {
@@ -229,10 +230,7 @@ int drive(Engine& eng, UdpSocket& sock, genesis_progress_fn progress, void* user
             return GENESIS_ERR_TIMEOUT;
         }
         eng.tick(now);
-        DatagramOut d;
-        while (eng.pop(d)) {
-            if (!sock.send_to(d.data, d.len, d.addr_be, d.port)) logf(1, "send failed");
-        }
+        flush_socket(eng, sock);
         int wait = 2;
         uint64_t wake = eng.next_wakeup_us();
         if (wake != 0 && wake <= now) wait = 0;
@@ -287,8 +285,7 @@ int drive(Engine& eng, UdpSocket& sock, genesis_progress_fn progress, void* user
     uint64_t until = now + 200000;
     while (monotonic_us() < until) {
         eng.tick(monotonic_us());
-        DatagramOut d;
-        while (eng.pop(d)) sock.send_to(d.data, d.len, d.addr_be, d.port);
+        flush_socket(eng, sock);
         uint8_t buf[1600];
         uint32_t addr = 0;
         uint16_t port = 0;
@@ -299,6 +296,18 @@ int drive(Engine& eng, UdpSocket& sock, genesis_progress_fn progress, void* user
 }
 
 }  // namespace
+
+void flush_socket(Engine& eng, UdpSocket& sock) {
+    DatagramOut d;
+    while (eng.pop(d)) {
+        if (sock.send_to(d.data, d.len, d.addr_be, d.port)) continue;
+        eng.push_front(d);
+        int err = errno;
+        if (err == EAGAIN || err == EWOULDBLOCK || err == ENOBUFS || err == EINTR) return;
+        logf(1, "send failed: %s", std::strerror(err));
+        return;
+    }
+}
 
 int run_send(const genesis_config* cfg, const char* path, const char* host, uint16_t port,
              genesis_progress_fn progress, void* user, genesis_stats* stats) {
@@ -515,8 +524,7 @@ int node_poll(Node* n, int timeout_ms) {
             s->open = true;
         }
         s->eng->tick(monotonic_us());
-        DatagramOut d;
-        while (s->eng->pop(d)) n->sock.send_to(d.data, d.len, d.addr_be, d.port);
+        flush_socket(*s->eng, n->sock);
         if (n->ctrl_fd >= 0 && s->eng && !s->eng->done()) {
             uint64_t t = monotonic_us();
             if (t - n->ctrl_prog_us > 100000) {
@@ -538,8 +546,7 @@ int node_poll(Node* n, int timeout_ms) {
         for (auto& s : n->sessions) {
             if (!s.eng) continue;
             s.eng->tick(monotonic_us());
-            DatagramOut d;
-            while (s.eng->pop(d)) n->sock.send_to(d.data, d.len, d.addr_be, d.port);
+            flush_socket(*s.eng, n->sock);
             if (s.eng->done()) finish_control(n, s);
         }
     }

@@ -42,7 +42,8 @@ enum FeatureBit : uint32_t {
     kFeatWifi = 1u << 10,
     kFeatDht = 1u << 11,
     kFeatJitter = 1u << 12,
-    kFeatResume = 1u << 13
+    kFeatResume = 1u << 13,
+    kFeatFecAccept = 1u << 14
 };
 
 struct Header {

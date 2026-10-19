@@ -210,8 +210,9 @@ struct Engine::Impl {
             else if (opt.profile == 3) link_kind = 2;
             else if (opt.profile == 1) link_kind = 1;
         }
-        /* Unknown link is treated as ethernet: FEC off, NACK on. Wi-Fi wants
-         * both. Cellular wants neither (jitter, not loss). An explicit 0 or 1
+        /* Unknown link is treated as ethernet. Wi-Fi wants FEC. Ethernet accepts
+         * it so a wi-fi peer is not left with NACK only, and does not force FEC
+         * on another ethernet peer. Cellular wants neither. An explicit 0 or 1
          * overrides the guess. */
         bool auto_fec = link_kind == 2;
         bool auto_nack = link_kind != 3;
@@ -234,6 +235,7 @@ struct Engine::Impl {
         local.profile = static_cast<uint8_t>(opt.profile);
         local.features = kFeatBbr | kFeatFile | kFeatRelay | kFeatDiscovery | kFeatJitter | kFeatResume;
         if (use_fec) local.features |= kFeatFec;
+        else if (opt.enable_fec < 0 && link_kind != 3) local.features |= kFeatFecAccept;
         if (use_nack) local.features |= kFeatNack;
         if (enable_dht) local.features |= kFeatDht;
         if (opt.enable_mesh) local.features |= kFeatMesh;
@@ -445,7 +447,10 @@ struct Engine::Impl {
         secure_zero(shared, 32);
         keys = true;
         negotiated = local.features & remote.features;
-        if ((negotiated & kFeatFec) == 0) use_fec = false;
+        bool fec_want = (local.features & kFeatFec) || (remote.features & kFeatFec);
+        bool fec_ok = (local.features & (kFeatFec | kFeatFecAccept)) &&
+                      (remote.features & (kFeatFec | kFeatFecAccept));
+        use_fec = fec_want && fec_ok;
         if ((negotiated & kFeatNack) == 0) use_nack = false;
         if (remote.profile == 2 || local.profile == 2 || link_kind == 3) bbr.reset(static_cast<uint32_t>(plain_mss), 2);
         mesh_observe(mesh, remote.node_id, 1000, 100000, start_us);
@@ -1057,7 +1062,14 @@ struct Engine::Impl {
             for (uint16_t i = 0; i < n && o + 8 <= plen; ++i, o += 8) {
                 uint64_t seq = load_be64(plain + o);
                 Slot* s = slot_for(seq);
-                if (s->used && s->seq == seq && !s->acked) s->sent_us = 0;
+                if (s->used && s->seq == seq && !s->acked && s->sends <= 1) {
+                    /* The first NACK can hurry one retransmission. Later NACKs
+                     * leave the retransmission timer alone, so a NACK stream
+                     * cannot spend the send budget in one RTT. */
+                    uint64_t gap = bbr.min_rtt_us();
+                    if (gap < 20000) gap = 20000;
+                    if (s->sent_us == 0 || now >= s->sent_us + gap) s->sent_us = 0;
+                }
             }
             return;
         }
@@ -1179,7 +1191,7 @@ struct Engine::Impl {
                     s.loss_marked = false;
                 }
             }
-            if (s.sends > 48) {
+            if (s.sends > 128) {
                 fail("too many retransmits");
                 return false;
             }
@@ -1455,6 +1467,11 @@ bool Engine::pop(DatagramOut& out) {
     out = impl_->outq[impl_->qh];
     impl_->qh = (impl_->qh + 1) % kOutQ;
     return true;
+}
+
+void Engine::push_front(const DatagramOut& out) {
+    impl_->qh = (impl_->qh + kOutQ - 1) % kOutQ;
+    impl_->outq[impl_->qh] = out;
 }
 
 bool Engine::done() const { return impl_->phase == PhDone || impl_->phase == PhFail; }

@@ -41,8 +41,9 @@ Feature bits in the hello, masked together by both peers:
 | 11 | DHT | GDHT queries are answered |
 | 12 | jitter | receiver holds out-of-order data before treating a gap as loss |
 | 13 | resume | a partial file with the same name and size continues at a chunk boundary |
+| 14 | fec-accept | this peer can run FEC if the other peer wants it |
 
-A bit the peer does not set is turned off locally. FEC and NACK therefore only run when both sides agree.
+A bit the peer does not set is turned off locally. NACK runs only when both sides set it. FEC runs when at least one side sets the FEC bit and the other side sets either FEC or fec-accept. Wi-Fi sets FEC. Ethernet and an unknown link set fec-accept, so they take parity from a wi-fi peer and do not force it on another ethernet peer. Cellular sets neither.
 
 The hello body may end with two trailing TLVs that an older peer ignores. Type 1 is a big-endian uint16, the sender's chunk size. Type 2 is a big-endian uint64, the byte offset the receiver already has. The offset is honored only when both peers set the resume bit, the destination sidecar names the same file and size, and the offset is a multiple of the chunk. The sender hashes the prefix it skips. The receiver hashes the bytes already on disk. The FIN digest is still the whole file.
 

@@ -784,6 +784,54 @@ void test_resume_and_control() {
     expect(reply.compare(0, 4, "ERR ") == 0, "control rejects unknown command");
 }
 
+void test_fec_follows_wifi() {
+    constexpr int kBytes = 8000;
+    Buf src;
+    Buf dst;
+    src.data.resize(kBytes);
+    for (int i = 0; i < kBytes; ++i) src.data[static_cast<size_t>(i)] = static_cast<uint8_t>(i * 5 + 1);
+    genesis::EngineOpts wifi;
+    wifi.enable_fec = -1;
+    wifi.enable_nack = -1;
+    wifi.link_hint = 2;
+    wifi.window = 64;
+    wifi.file_size = kBytes;
+    std::snprintf(wifi.file_name, sizeof(wifi.file_name), "w.bin");
+    genesis::EngineOpts eth = wifi;
+    eth.link_hint = 1;
+    genesis::Engine tx(wifi, true);
+    genesis::Engine rx(eth, false);
+    tx.add_candidate({0x7f000001u, 1});
+    tx.set_io(rd, nullptr, &src);
+    rx.set_io(nullptr, wr, &dst);
+    expect(xfer(tx, rx, 0, 20000), "wifi to ethernet");
+    expect(dst.data == src.data, "wifi to ethernet bytes");
+    expect(tx.fec_on() && rx.fec_on(), "ethernet accepts wifi fec");
+    expect(tx.fec_tx_packets() > 0, "wifi sent parity");
+
+    src.off = 0;
+    dst.data.clear();
+    genesis::Engine ta(eth, true);
+    genesis::Engine tb(eth, false);
+    ta.add_candidate({0x7f000001u, 1});
+    ta.set_io(rd, nullptr, &src);
+    tb.set_io(nullptr, wr, &dst);
+    expect(xfer(ta, tb, 0, 20000), "ethernet pair");
+    expect(!ta.fec_on() && !tb.fec_on(), "ethernet pair leaves fec off");
+
+    src.off = 0;
+    dst.data.clear();
+    genesis::EngineOpts cell = wifi;
+    cell.link_hint = 3;
+    genesis::Engine tc(wifi, true);
+    genesis::Engine td(cell, false);
+    tc.add_candidate({0x7f000001u, 1});
+    tc.set_io(rd, nullptr, &src);
+    td.set_io(nullptr, wr, &dst);
+    expect(xfer(tc, td, 0, 20000), "wifi to cellular");
+    expect(!tc.fec_on() && !td.fec_on(), "cellular declines fec");
+}
+
 }  // namespace
 
 int main() {
@@ -801,6 +849,7 @@ int main() {
     test_jitter_link_dht();
     test_routes_and_fec_nack();
     test_resume_and_control();
+    test_fec_follows_wifi();
     if (g_fails) {
         std::fprintf(stderr, "%d failure(s)\n", g_fails);
         return 1;

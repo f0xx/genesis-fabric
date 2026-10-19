@@ -88,7 +88,7 @@ The handshake carries a feature bitmask. FEC is bit 0 and NACK is bit 9. A featu
 | Wi-Fi | `wl*`, `wlan*` | on | on | 20 Mbit/s | 8 ms |
 | Cellular | `wwan*`, `rmnet*`, `ppp*`, or a long RTT | off | off | 5 Mbit/s | 40 ms |
 
-Ethernet is the preferred guess when the interface is unknown. A named interface is not reclassified just because the RTT looks like another medium. Wi-Fi and wired paths are expected to drop packets, so they keep NACK and, on Wi-Fi, parity. Cellular is expected to jitter without dropping, so parity and NACK stay off and a late packet is not called a loss until the hold expires.
+Ethernet is the preferred guess when the interface is unknown. A named interface is not reclassified just because the RTT looks like another medium. Wi-Fi and wired paths are expected to drop packets, so they keep NACK. Wi-Fi sends parity. An ethernet peer accepts that parity and does not send parity to another ethernet peer. Cellular is expected to jitter without dropping, so parity and NACK stay off and a late packet is not called a loss until the hold expires.
 
 Force a combination when comparing the path:
 
