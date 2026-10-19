@@ -22,6 +22,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -331,8 +332,32 @@ void test_config_and_jail() {
     expect(genesis_path_is_safe("/var/genesis", "../etc/passwd", resolved, sizeof(resolved)) == GENESIS_ERR_JAIL, "dotdot");
     expect(genesis_path_is_safe("/var/genesis", "/etc/passwd", resolved, sizeof(resolved)) == GENESIS_ERR_JAIL, "absolute");
     expect(genesis_path_is_safe(".", "clip.bin", resolved, sizeof(resolved)) == GENESIS_OK, "relative root");
-    char err[64];
-    expect(genesis_jail_apply("/tmp", "nobody", err, sizeof(err)) == GENESIS_ERR_JAIL, "unprivileged jail fails closed");
+    char err[160];
+    if (geteuid() != 0) {
+        expect(genesis_jail_apply("/tmp", "nobody", err, sizeof(err)) == GENESIS_ERR_JAIL, "unprivileged jail fails closed");
+        return;
+    }
+    /* As root the call really chroots and drops uid. Do that in a child so the
+     * rest of this process, including the control-socket test, stays put. */
+    expect(genesis_jail_apply("/tmp", "no-such-genesis-user", err, sizeof(err)) == GENESIS_ERR_JAIL,
+           "unknown drop user fails closed");
+    pid_t pid = fork();
+    if (pid < 0) {
+        fail("fork jail");
+        return;
+    }
+    if (pid == 0) {
+        int rc = genesis_jail_apply("/tmp", "nobody", err, sizeof(err));
+        if (rc != GENESIS_OK) {
+            std::fprintf(stderr, "root jail: %s\n", err);
+            _exit(2);
+        }
+        if (geteuid() == 0 || setuid(0) == 0) _exit(3);
+        _exit(0);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        fail("root jail drops privileges");
 }
 
 void test_ring() {
