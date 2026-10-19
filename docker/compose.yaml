@@ -1,0 +1,19 @@
+# Three nodes on one bridge. No router changes: they talk UDP on the docker network.
+services:
+  a:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["genesisd", "--foreground", "-p", "37420", "--recv-dir", "/data"]
+    volumes:
+      - a-data:/data
+  b:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["sleep", "infinity"]
+    volumes:
+      - b-data:/data
+volumes:
+  a-data:
+  b-data:

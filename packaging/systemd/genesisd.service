@@ -1,0 +1,26 @@
+[Unit]
+Description=Genesis Codes UDP transfer daemon
+Documentation=file:/usr/share/doc/genesis/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/genesisd --foreground -c /etc/genesis/genesis.conf
+Restart=on-failure
+RestartSec=2
+User=genesis
+Group=genesis
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/genesis
+RuntimeDirectory=genesis
+# Optional jail. Uncomment only when the directory exists and the process starts as root,
+# then drop with --user. systemd's own User= already drops privileges, so do not also
+# chroot unless the unit stays root and genesisd calls --chroot/--user itself.
+# ExecStart=/usr/bin/genesisd --foreground --chroot /var/lib/genesis --user genesis -c /etc/genesis/genesis.conf
+
+[Install]
+WantedBy=multi-user.target

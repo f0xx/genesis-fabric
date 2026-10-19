@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+# Genesis Codes daemon for OpenRC / sysv (Gentoo).
+# Install as /etc/init.d/genesisd and do not enable it from this repository.
+# supervise-daemon keeps the process in the foreground; genesisd must not double-fork.
+
+name="genesisd"
+description="Genesis Codes UDP transfer daemon"
+command="/usr/bin/genesisd"
+command_args="--foreground -c ${GENESIS_CONFIG:-/etc/genesis/genesis.conf}"
+command_user="${GENESIS_USER:-genesis}:${GENESIS_GROUP:-genesis}"
+supervisor="supervise-daemon"
+pidfile="/run/genesisd.pid"
+respawn_delay=2
+respawn_max=5
+
+depend() {
+    need net
+    after firewall
+}
+
+# Sysv-style double-fork, only if a caller explicitly sets GENESIS_SYS_DAEMON=1.
+# The default path above is the one OpenRC should use.
+start_sysv() {
+    ebegin "Starting ${name}"
+    start-stop-daemon --start --exec /usr/bin/genesisd --pidfile /run/genesisd.pid \
+        -- --daemon --pid /run/genesisd.pid -c "${GENESIS_CONFIG:-/etc/genesis/genesis.conf}"
+    eend $?
+}

@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  asan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: packages
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config liburing-dev
+      - name: configure
+        run: cmake -S . -B build -DGENESIS_SANITIZER=address -DGENESIS_IO_URING=AUTO
+      - name: build
+        run: cmake --build build -j
+      - name: test
+        run: ctest --test-dir build --output-on-failure
+
+  perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: packages
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config liburing-dev
+      - name: configure
+        run: cmake -S . -B build-rel -DCMAKE_BUILD_TYPE=Release -DGENESIS_IO_URING=OFF
+      - name: build
+        run: cmake --build build-rel -j --target genesis-perf genesis_tests
+      - name: unit and perf summary
+        run: |
+          ctest --test-dir build-rel -R 'unit|perf' --output-on-failure
+          ./build-rel/genesis-perf | tee perf-summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-summary
+          path: perf-summary.txt
+
+  tsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: packages
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ pkg-config liburing-dev
+      - name: configure
+        run: cmake -S . -B build-tsan -DGENESIS_SANITIZER=thread -DGENESIS_IO_URING=OFF
+      - name: build
+        run: cmake --build build-tsan -j
+      - name: test
+        run: ctest --test-dir build-tsan --output-on-failure

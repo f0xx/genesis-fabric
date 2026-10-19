@@ -1,0 +1,25 @@
+#!/sbin/openrc-run
+# Local web control for genesis. Not enabled by this repository.
+# supervise-daemon keeps genesis-web in the foreground.
+
+name="genesis-web"
+description="Genesis web control"
+command="${GENESIS_WEB:-/usr/bin/genesis-web}"
+command_args="-listen ${GENESIS_WEB_LISTEN:-127.0.0.1:8787} -genesis ${GENESIS_BIN:-/usr/bin/genesis}"
+supervisor="supervise-daemon"
+pidfile="/run/genesis-web.pid"
+respawn_delay=2
+respawn_max=5
+
+depend() {
+    need net
+}
+
+# SysV-only start. The process itself stays in the foreground; this helper backgrounds it.
+start_sysv() {
+    ebegin "Starting ${name}"
+    start-stop-daemon --start --background --make-pidfile --pidfile /run/genesis-web.pid \
+        --exec "${GENESIS_WEB:-/usr/bin/genesis-web}" -- \
+        -listen "${GENESIS_WEB_LISTEN:-127.0.0.1:8787}" -genesis "${GENESIS_BIN:-/usr/bin/genesis}"
+    eend $?
+}

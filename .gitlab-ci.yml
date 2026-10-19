@@ -1,0 +1,39 @@
+stages:
+  - test
+
+variables:
+  GIT_SUBMODULE_STRATEGY: none
+
+asan:
+  stage: test
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update && apt-get install -y cmake g++ pkg-config liburing-dev
+  script:
+    - cmake -S . -B build -DGENESIS_SANITIZER=address
+    - cmake --build build -j
+    - ctest --test-dir build --output-on-failure
+
+perf:
+  stage: test
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update && apt-get install -y cmake g++ pkg-config liburing-dev
+  script:
+    - cmake -S . -B build-rel -DCMAKE_BUILD_TYPE=Release -DGENESIS_IO_URING=OFF
+    - cmake --build build-rel -j --target genesis-perf
+    - ./build-rel/genesis-perf | tee perf-summary.txt
+  artifacts:
+    when: always
+    paths:
+      - perf-summary.txt
+
+tsan:
+  stage: test
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update && apt-get install -y cmake g++ pkg-config liburing-dev
+  script:
+    - cmake -S . -B build-tsan -DGENESIS_SANITIZER=thread -DGENESIS_IO_URING=OFF
+    - cmake --build build-tsan -j
+    - ctest --test-dir build-tsan --output-on-failure
