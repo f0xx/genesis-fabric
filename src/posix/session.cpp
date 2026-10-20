@@ -346,7 +346,14 @@ void flush_socket(Engine& eng, UdpSocket& sock) {
         eng.push_front(d);
         int err = errno;
         if (err == EAGAIN || err == EWOULDBLOCK || err == ENOBUFS || err == EINTR) return;
-        logf(1, "send failed: %s", std::strerror(err));
+        /* A vanished route otherwise retries this datagram in a tight loop. */
+        static uint64_t last_log = 0;
+        uint64_t now = monotonic_us();
+        if (last_log == 0 || now - last_log > 1000000ull) {
+            logf(1, "send failed: %s", std::strerror(err));
+            last_log = now;
+        }
+        ::usleep(20000);
         return;
     }
 }
