@@ -92,7 +92,9 @@ int apply_global(Opt& o, int& i, int argc, char** argv) {
         if (!take(i, argc, argv, &v)) return -1;
         o.peer_port = std::atoi(v);
         o.port_set = true;
-        return o.peer_port > 0 && o.peer_port <= 65535 ? 0 : -1;
+        /* 0 is the ephemeral port used by recv --ssh-pipe. */
+        if (o.peer_port == 0 && std::strcmp(v, "0") != 0) return -1;
+        return o.peer_port >= 0 && o.peer_port <= 65535 ? 0 : -1;
     }
     if (std::strcmp(a, "--listen") == 0) {
         if (!take(i, argc, argv, &v)) return -1;
