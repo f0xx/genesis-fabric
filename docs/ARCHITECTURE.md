@@ -11,7 +11,8 @@ The core is single-threaded. `Engine::start`, `tick`, `on_datagram`, and `pop` a
 - Reed-Solomon over GF(2^8), systematic, erasure-only. Parity row 0 is the XOR of the data shards. The receiver learns the sender's chunk size from the first block, so a gigabit profile and a cellular profile can still exchange a file.
 - User-space BBR. Startup gain 2.77 on a gigabit profile and 2.0 on cellular. One spurious timeout does not end startup. A loss of more than 16 segments does. ProbeBW cycles cruise, refill, up, and down. ProbeRTT runs for 200 ms.
 - Mesh table. The metric is `rtt_us * 1000 / bw_kbps`. Gossip is a monotonic sequence plus the table. A direct observation is kept when a gossip advertisement is worse.
-- Discovery beacon magic `GDIS` on 239.255.42.19:37421. This is not SSDP and it does not map a port on the router.
+- Discovery beacon magic `GDIS` on 239.255.42.19:37421. This is not SSDP and it does not map a port on the router. A trailer after the name lists filesystem exports. Older decoders ignore it.
+- VFS, frame type 14, is a sibling of the file engine on the same UDP socket. One handshake, then filesystem RPCs. `mount.genesis` is the FUSE client. The daemon and `genesis vfs-serve` are the servers. See `docs/VFS.md`.
 - STUN Binding request, XOR-MAPPED-ADDRESS, MESSAGE-INTEGRITY (HMAC-SHA1), fingerprint. TURN Allocate is constructed. A full long-term TURN client is not finished.
 - SPSC ring for a streaming handoff. One producer, one consumer, power-of-two capacity.
 

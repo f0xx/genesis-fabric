@@ -13,9 +13,12 @@
 #include "ring.hpp"
 #include "stun.hpp"
 #include "util.hpp"
+#include "vfs_codec.hpp"
 #include "wire.hpp"
 
 #include <atomic>
+#include <cerrno>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -832,6 +835,228 @@ void test_fec_follows_wifi() {
     expect(!tc.fec_on() && !td.fec_on(), "cellular declines fec");
 }
 
+struct VfsCall {
+    int rpc = -1;
+    int status = -1;
+    genesis_vfs_res res{};
+    std::vector<uint8_t> data;
+};
+
+VfsCall vfs_call(genesis_vfs* session, int op, const char* path, const char* name, const void* bytes, uint32_t n,
+                 uint32_t mode, uint64_t offset, uint64_t size, uint32_t flags = 0) {
+    VfsCall c;
+    genesis_vfs_req req{};
+    req.op = op;
+    req.path = path;
+    req.name = name;
+    req.data = static_cast<const uint8_t*>(bytes);
+    req.data_len = n;
+    req.mode = mode;
+    req.offset = offset;
+    req.size = size;
+    req.flags = flags;
+    uint8_t buf[65536];
+    genesis_vfs_res res{};
+    res.data = buf;
+    res.data_cap = sizeof(buf);
+    c.rpc = genesis_vfs_call(session, &req, &res, 15000);
+    c.res = res;
+    c.res.data = nullptr;
+    c.status = c.rpc == GENESIS_OK ? res.status : c.rpc;
+    if (c.rpc == GENESIS_OK && res.data_len) c.data.assign(buf, buf + res.data_len);
+    return c;
+}
+
+void test_vfs() {
+    uint8_t zeros[400];
+    std::memset(zeros, 0, sizeof(zeros));
+    uint8_t packed[400];
+    size_t cn = genesis::vfs_compress(packed, sizeof(packed), zeros, sizeof(zeros));
+    expect(cn > 0 && cn < sizeof(zeros), "zeros compress");
+    uint8_t back[400];
+    expect(genesis::vfs_decompress(back, sizeof(back), packed, cn) == sizeof(zeros), "zeros inflate");
+    expect(std::memcmp(back, zeros, sizeof(zeros)) == 0, "zeros match");
+    const uint8_t hello[] = {'a', 'b', 'c', 'd', 'e', 'f'};
+    cn = genesis::vfs_compress(packed, sizeof(packed), hello, sizeof(hello));
+    expect(cn > 0, "short compress");
+    expect(genesis::vfs_decompress(back, sizeof(back), packed, cn) == sizeof(hello), "short inflate");
+    expect(std::memcmp(back, hello, sizeof(hello)) == 0, "short match");
+
+    genesis::VfsBlob blob;
+    blob.op = GENESIS_VFS_WRITE;
+    blob.path = "d/f";
+    blob.data.assign(zeros, zeros + sizeof(zeros));
+    uint8_t sealed[1024];
+    size_t sn = genesis::vfs_seal(sealed, sizeof(sealed), blob);
+    expect(sn > 1 && sealed[0] == 0xA1, "large blob compresses");
+    genesis::VfsBlob opened;
+    expect(genesis::vfs_open_blob(sealed, sn, opened) && opened.path == "d/f" && opened.data.size() == sizeof(zeros),
+           "seal roundtrip");
+
+    genesis::Beacon beacon;
+    beacon.port = 9;
+    std::snprintf(beacon.name, sizeof(beacon.name), "n");
+    uint8_t pkt[256];
+    size_t blen = genesis::beacon_encode(pkt, sizeof(pkt), beacon);
+    char names[2][32] = {};
+    std::snprintf(names[0], 32, "box");
+    uint8_t rw[2] = {1, 0};
+    std::snprintf(names[1], 32, "pub");
+    blen = genesis::beacon_append_exports(pkt, sizeof(pkt), blen, names, rw, 2);
+    genesis::Beacon decoded;
+    expect(genesis::beacon_decode(pkt, blen, decoded) && decoded.port == 9, "old beacon still decodes");
+    char gotn[2][32] = {};
+    uint8_t gotrw[2] = {};
+    expect(genesis::beacon_read_exports(pkt, blen, gotn, gotrw, 2) == 2, "export trailer");
+    expect(std::strcmp(gotn[0], "box") == 0 && gotrw[0] == 1 && gotrw[1] == 0, "trailer fields");
+
+    genesis_config cfg;
+    genesis_config_init(&cfg);
+    expect(genesis_config_set(&cfg, "export", "photos /tmp/photos rw") == GENESIS_OK, "export words");
+    expect(cfg.export_rw[0] == 1 && std::strcmp(cfg.export_name[0], "photos") == 0, "export rw");
+    expect(genesis_config_set(&cfg, "export", "pub=/tmp/pub,ro") == GENESIS_OK, "export equals");
+    expect(cfg.export_rw[1] == 0 && std::strcmp(cfg.export_path[1], "/tmp/pub") == 0, "export ro path");
+    expect(genesis_config_set(&cfg, "export", "dots /tmp/foo..bar") == GENESIS_OK, "dots inside a name");
+    expect(genesis_config_set(&cfg, "export", "bad /tmp/../etc") == GENESIS_ERR_ARGS, "export dotdot");
+    expect(genesis_config_set(&cfg, "export", "photos /tmp/other") == GENESIS_ERR_ARGS, "duplicate export");
+
+    expect(std::system("rm -rf tmp/vfs_unit") == 0, "clear vfs fixture");
+    mkdir("tmp", 0755);
+    mkdir("tmp/vfs_unit", 0755);
+    mkdir("tmp/vfs_unit/box", 0755);
+    mkdir("tmp/vfs_unit/secret", 0755);
+    FILE* note = std::fopen("tmp/vfs_unit/secret/note", "w");
+    expect(note != nullptr, "secret note");
+    if (note) {
+        std::fputs("hidden", note);
+        std::fclose(note);
+    }
+    expect(::symlink("../secret/note", "tmp/vfs_unit/box/leak") == 0, "local symlink");
+
+    genesis_config_init(&cfg);
+    cfg.bind_port = 0;
+    cfg.enable_discovery = 0;
+    std::snprintf(cfg.export_name[0], sizeof(cfg.export_name[0]), "box");
+    std::snprintf(cfg.export_path[0], sizeof(cfg.export_path[0]), "tmp/vfs_unit/box");
+    cfg.export_rw[0] = 1;
+    std::snprintf(cfg.export_name[1], sizeof(cfg.export_name[1]), "pub");
+    std::snprintf(cfg.export_path[1], sizeof(cfg.export_path[1]), "tmp/vfs_unit/box");
+    cfg.export_rw[1] = 0;
+    cfg.export_count = 2;
+    std::snprintf(cfg.control, sizeof(cfg.control), "tmp/vfs_unit.sock");
+    ::unlink(cfg.control);
+
+    genesis_vfs_server* server = genesis_vfs_server_start(&cfg);
+    expect(server != nullptr && genesis_vfs_server_port(server) != 0, "vfs server");
+    if (!server) return;
+    uint16_t port = genesis_vfs_server_port(server);
+    genesis_config client;
+    genesis_config_init(&client);
+    client.enable_discovery = 0;
+    genesis_vfs* session = genesis_vfs_connect(&client, "127.0.0.1", port, "box", 4000);
+    expect(session != nullptr, "vfs connect");
+    if (!session) {
+        genesis_vfs_server_stop(server);
+        return;
+    }
+
+    VfsCall list = vfs_call(session, GENESIS_VFS_LIST, nullptr, nullptr, nullptr, 0, 0, 0, 0);
+    std::vector<genesis::VfsShare> shares;
+    expect(list.rpc == GENESIS_OK && genesis::vfs_shares_read(list.data.data(), list.data.size(), shares) && shares.size() == 2,
+           "list exports");
+    VfsCall st = vfs_call(session, GENESIS_VFS_STAT, "", nullptr, nullptr, 0, 0, 0, 0);
+    expect(st.rpc == GENESIS_OK && st.status == 0 && S_ISDIR(st.res.mode), "stat root");
+    VfsCall made = vfs_call(session, GENESIS_VFS_MKDIR, "d", nullptr, nullptr, 0, 0755, 0, 0);
+    expect(made.status == 0, "mkdir");
+    const char* hi = "hello";
+    VfsCall created = vfs_call(session, GENESIS_VFS_CREATE, "d/f", nullptr, hi, 5, 0644, 0, 5);
+    expect(created.status == 0, "create");
+
+    std::vector<uint8_t> big(40000);
+    for (size_t i = 0; i < big.size(); ++i) big[i] = static_cast<uint8_t>(i * 17u);
+    genesis_vfs_server_lose(server, 4);
+    VfsCall wrote = vfs_call(session, GENESIS_VFS_WRITE, "d/big", nullptr, big.data(), static_cast<uint32_t>(big.size()), 0644,
+                             0, big.size(), GENESIS_VFS_CREAT);
+    expect(wrote.rpc == GENESIS_OK && wrote.status == 0, "write with loss");
+    VfsCall read = vfs_call(session, GENESIS_VFS_READ, "d/big", nullptr, nullptr, 0, 0, 0, big.size());
+    genesis_vfs_server_lose(server, 0);
+    expect(read.rpc == GENESIS_OK && read.status == 0 && read.data == big, "read back");
+
+    expect(vfs_call(session, GENESIS_VFS_CHMOD, "d/f", nullptr, nullptr, 0, 0640, 0, 0).status == 0, "chmod");
+    VfsCall mode = vfs_call(session, GENESIS_VFS_STAT, "d/f", nullptr, nullptr, 0, 0, 0, 0);
+    expect(mode.status == 0 && (mode.res.mode & 0777) == 0640, "mode bits");
+    expect(vfs_call(session, GENESIS_VFS_RENAME, "d/f", "d/g", nullptr, 0, 0, 0, 0).status == 0, "rename");
+    expect(vfs_call(session, GENESIS_VFS_LINK, "d/g", "d/h", nullptr, 0, 0, 0, 0).status == 0, "link");
+    expect(vfs_call(session, GENESIS_VFS_SYMLINK, "d/alias", "g", nullptr, 0, 0, 0, 0).status == 0, "symlink");
+    VfsCall rl = vfs_call(session, GENESIS_VFS_READLINK, "d/alias", nullptr, nullptr, 0, 0, 0, 0);
+    expect(rl.status == 0 && std::strcmp(rl.res.name, "g") == 0, "readlink");
+    VfsCall dir = vfs_call(session, GENESIS_VFS_READDIR, "d", nullptr, nullptr, 0, 0, 0, 0);
+    expect(dir.status == 0 && dir.data.size() > 0, "readdir");
+    bool saw = false;
+    size_t io = 0;
+    genesis::VfsDirEnt ent;
+    while (genesis::vfs_dir_next(dir.data.data(), dir.data.size(), &io, &ent))
+        if (std::strcmp(ent.name, "g") == 0) saw = true;
+    expect(saw, "readdir has g");
+    expect(vfs_call(session, GENESIS_VFS_TRUNCATE, "d/g", nullptr, nullptr, 0, 0, 0, 3).status == 0, "truncate");
+    VfsCall small = vfs_call(session, GENESIS_VFS_STAT, "d/g", nullptr, nullptr, 0, 0, 0, 0);
+    expect(small.status == 0 && small.res.size == 3, "truncated size");
+    expect(vfs_call(session, GENESIS_VFS_STATFS, "", nullptr, nullptr, 0, 0, 0, 0).status == 0, "statfs");
+    expect(vfs_call(session, GENESIS_VFS_READ, "leak", nullptr, nullptr, 0, 0, 0, 16).status == ELOOP, "symlink not followed");
+    expect(vfs_call(session, GENESIS_VFS_SYMLINK, "d/abs", "/etc/passwd", nullptr, 0, 0, 0, 0).rpc == GENESIS_ERR_JAIL,
+           "absolute symlink rejected");
+    expect(vfs_call(session, GENESIS_VFS_STAT, "../secret/note", nullptr, nullptr, 0, 0, 0, 0).rpc == GENESIS_ERR_JAIL,
+           "dotdot rejected");
+    expect(vfs_call(session, GENESIS_VFS_UNLINK, "d/g", nullptr, nullptr, 0, 0, 0, 0).status == 0, "unlink");
+    expect(vfs_call(session, GENESIS_VFS_UNLINK, "d/h", nullptr, nullptr, 0, 0, 0, 0).status == 0, "unlink link");
+    expect(vfs_call(session, GENESIS_VFS_UNLINK, "d/alias", nullptr, nullptr, 0, 0, 0, 0).status == 0, "unlink symlink");
+    expect(vfs_call(session, GENESIS_VFS_UNLINK, "d/big", nullptr, nullptr, 0, 0, 0, 0).status == 0, "unlink big");
+    expect(vfs_call(session, GENESIS_VFS_RMDIR, "d", nullptr, nullptr, 0, 0, 0, 0).status == 0, "rmdir");
+    genesis_vfs_close(session);
+
+    genesis_vfs* ro = genesis_vfs_connect(&client, "127.0.0.1", port, "pub", 4000);
+    expect(ro != nullptr, "ro connect");
+    if (ro) {
+        expect(vfs_call(ro, GENESIS_VFS_MKDIR, "nope", nullptr, nullptr, 0, 0755, 0, 0).status == EROFS, "ro export");
+        genesis_vfs_close(ro);
+    }
+
+    genesis_vfs* ctrl = genesis_vfs_connect_control(cfg.control, "box", 4000);
+    expect(ctrl != nullptr, "control connect");
+    if (ctrl) {
+        expect(vfs_call(ctrl, GENESIS_VFS_STAT, "", nullptr, nullptr, 0, 0, 0, 0).status == 0, "control stat");
+        genesis_vfs_close(ctrl);
+    }
+    genesis_vfs_server_stop(server);
+
+    genesis_config_init(&cfg);
+    cfg.bind_port = 0;
+    cfg.enable_discovery = 0;
+    std::snprintf(cfg.export_name[0], sizeof(cfg.export_name[0]), "box");
+    std::snprintf(cfg.export_path[0], sizeof(cfg.export_path[0]), "tmp/vfs_unit/box");
+    cfg.export_rw[0] = 1;
+    cfg.export_count = 1;
+    genesis_node* node = genesis_node_create(&cfg);
+    expect(node != nullptr && genesis_node_port(node) != 0, "node port");
+    if (node) {
+        std::atomic<int> run{1};
+        std::thread poller([&] {
+            while (run.load()) genesis_node_poll(node, 50);
+        });
+        genesis_vfs* via = genesis_vfs_connect(&client, "127.0.0.1", genesis_node_port(node), "box", 4000);
+        expect(via != nullptr, "connect to daemon node");
+        if (via) {
+            expect(vfs_call(via, GENESIS_VFS_STAT, "", nullptr, nullptr, 0, 0, 0, 0).status == 0, "node stat");
+            genesis_vfs_close(via);
+        }
+        run.store(0);
+        genesis_node_request_stop(node);
+        poller.join();
+        genesis_node_destroy(node);
+    }
+    expect(std::system("rm -rf tmp/vfs_unit tmp/vfs_unit.sock") == 0, "remove vfs fixture");
+}
+
 }  // namespace
 
 int main() {
@@ -850,6 +1075,7 @@ int main() {
     test_routes_and_fec_nack();
     test_resume_and_control();
     test_fec_follows_wifi();
+    test_vfs();
     if (g_fails) {
         std::fprintf(stderr, "%d failure(s)\n", g_fails);
         return 1;

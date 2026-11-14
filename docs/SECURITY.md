@@ -17,6 +17,8 @@ The sample that shipped with the design notes is not this protocol. These choice
 
 Handshake version and header version are both checked. A newer peer is rejected rather than parsed with the version-1 layout.
 
+A filesystem export uses that same handshake. The server opens paths with `O_NOFOLLOW` and refuses `..` and an absolute symlink target. A read-only export rejects changes. The control-socket form of the same calls is local and mode `0600`; it is not a network listener unless the operator points `--control` at `host:port`.
+
 Peer updates cannot rewind the sequence. Unknown TLVs are ignored, so a new feature does not break an older peer, and an older peer does not apply a TLV it does not know.
 
 ## NAT

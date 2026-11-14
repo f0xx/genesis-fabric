@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <cstring>
 
-const char* genesis_version(void) { return "1.1.0"; }
+const char* genesis_version(void) { return "1.2.0"; }
 
 void genesis_log_syslog(int on) { genesis::log_use_syslog(on); }
 
@@ -69,6 +69,10 @@ void genesis_node_destroy(genesis_node* node) {
 }
 int genesis_node_stats(const genesis_node* node, genesis_stats* stats) {
     return genesis::node_stats(reinterpret_cast<const genesis::Node*>(node), stats);
+}
+
+uint16_t genesis_node_port(const genesis_node* node) {
+    return genesis::node_port(reinterpret_cast<const genesis::Node*>(node));
 }
 
 int genesis_detect_link(char* ifname, size_t ifname_cap) {

@@ -35,4 +35,54 @@ bool beacon_decode(const uint8_t* src, size_t len, Beacon& b) {
     return true;
 }
 
+size_t beacon_append_exports(uint8_t* dst, size_t cap, size_t len, const char names[][32], const uint8_t* rw,
+                             int count) {
+    if (!dst || len > cap || count <= 0 || !names || !rw) return len;
+    if (count > 8) count = 8;
+    size_t need = len + 2;
+    for (int i = 0; i < count; ++i) {
+        size_t n = 0;
+        while (names[i][n] && n < 31) ++n;
+        need += 2 + n;
+    }
+    if (need > cap) return len;
+    dst[len] = 0xE1;
+    dst[len + 1] = static_cast<uint8_t>(count);
+    size_t o = len + 2;
+    for (int i = 0; i < count; ++i) {
+        size_t n = 0;
+        while (names[i][n] && n < 31) ++n;
+        dst[o++] = static_cast<uint8_t>(n);
+        std::memcpy(dst + o, names[i], n);
+        o += n;
+        dst[o++] = rw[i] ? 1 : 0;
+    }
+    return o;
+}
+
+int beacon_read_exports(const uint8_t* src, size_t len, char names[][32], uint8_t* rw, int cap) {
+    if (!src || len < 28 || !names || cap <= 0) return 0;
+    uint8_t name = src[27];
+    size_t o = 28u + name;
+    if (o >= len || src[o] != 0xE1) return 0;
+    ++o;
+    if (o >= len) return 0;
+    int count = src[o++];
+    if (count < 0 || count > 8) return 0;
+    int got = 0;
+    for (int i = 0; i < count; ++i) {
+        if (o >= len) return 0;
+        uint8_t n = src[o++];
+        if (n > 31 || o + n + 1 > len) return 0;
+        if (got < cap) {
+            std::memset(names[got], 0, 32);
+            std::memcpy(names[got], src + o, n);
+            rw[got] = src[o + n] ? 1 : 0;
+            ++got;
+        }
+        o += static_cast<size_t>(n) + 1;
+    }
+    return got;
+}
+
 }  // namespace genesis

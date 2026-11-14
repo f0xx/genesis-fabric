@@ -64,6 +64,18 @@ genesis --control /tmp/genesis.sock send -p 37420 ./clip.bin 192.168.4.100
 
 Without `--control`, `send` and `recv` call the library in this process. `--ssh` stays on that path.
 
+## Filesystem exports
+
+```sh
+genesis vfs-serve -p 37420 --export "photos=/home/foxx/photos,rw"
+genesis showmount 192.168.4.100:37420
+mount.genesis 192.168.4.100:37420:/photos /mnt/photos
+mount.genesis --control /tmp/genesis.sock photos /mnt/photos
+mount.genesis --ssh user@host --remote-export /home/user/photos photos /mnt/photos
+```
+
+`export = name path [ro|rw]` in the daemon config publishes the same directory. `docs/VFS.md` is the full description.
+
 ## Discovery and STUN
 
 ```sh

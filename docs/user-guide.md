@@ -22,6 +22,10 @@ genesis recv [options] [-o FILE]
 genesis discover [--timeout-ms MS]
 genesis stun
 genesis dht HOST[:PORT]
+genesis showmount [HOST[:PORT]]
+genesis tree HOST[:PORT]:/EXPORT[/PATH]
+genesis vfs-serve [--export NAME=PATH[,ro]]
+genesis mount [mount.genesis options] SPEC MOUNTPOINT
 genesis version
 ```
 
@@ -46,6 +50,8 @@ genesis --control /tmp/genesis.sock send -p 37420 ./file.bin 192.168.4.100
 ```
 
 The spec is a filesystem path, `unix:/path`, or `host:port`. `recv` uses the daemon's UDP port. `send` opens its own socket in the daemon process. One control command runs at a time. `--ssh` stays in the local process.
+
+`export` lines in the daemon config publish directories. `mount.genesis HOST:PORT:/NAME MOUNTPOINT` mounts one. `--control PATH` on the mount helper uses the daemon socket instead of UDP. The operations and the SSH form are in `docs/VFS.md`.
 
 ### Options
 

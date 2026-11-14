@@ -21,7 +21,8 @@ void usage() {
                  "can own the process. --daemon double-forks for a sysv-style start.\n"
                  "-v logs transfer init, handshake flags, DHT nodes, and the end summary to stderr.\n"
                  "With --daemon those lines go to syslog (ident genesisd) instead.\n"
-                 "--control PATH or --control HOST:PORT accepts send/recv from genesis --control.\n",
+                 "--control PATH or --control HOST:PORT accepts send/recv from genesis --control.\n"
+                 "export = NAME PATH [ro|rw] in the config publishes a directory for mount.genesis.\n",
                  genesis_version());
 }
 

@@ -64,6 +64,7 @@ set(GENESIS_CORE_SOURCES
     src/core/sha1.cpp
     src/core/sha256.cpp
     src/core/stun.cpp
+    src/core/vfs_codec.cpp
     src/core/wire.cpp
     src/core/x25519.cpp
     src/posix/api.cpp
@@ -72,6 +73,7 @@ set(GENESIS_CORE_SOURCES
     src/posix/session.cpp
     src/posix/control.cpp
     src/posix/udp.cpp
+    src/posix/vfs.cpp
 )
 
 add_library(genesis_core SHARED ${GENESIS_CORE_SOURCES})
@@ -112,10 +114,23 @@ target_include_directories(genesis_core_embedded PUBLIC
 target_compile_definitions(genesis_core_embedded PUBLIC GENESIS_EMBEDDED=1)
 
 add_executable(genesis apps/cli/main.cpp)
+target_include_directories(genesis PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_link_libraries(genesis PRIVATE genesis_core)
 
 add_executable(genesisd apps/daemon/main.cpp)
 target_link_libraries(genesisd PRIVATE genesis_core)
+
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(FUSE3 fuse3)
+endif()
+if(FUSE3_FOUND)
+    add_executable(mount_genesis apps/mount/main.cpp)
+    target_compile_definitions(mount_genesis PRIVATE FUSE_USE_VERSION=35)
+    target_include_directories(mount_genesis PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core ${FUSE3_INCLUDE_DIRS})
+    target_link_libraries(mount_genesis PRIVATE genesis_core ${FUSE3_LIBRARIES})
+    set_target_properties(mount_genesis PROPERTIES OUTPUT_NAME mount.genesis)
+endif()
 
 add_executable(genesis_tests tests/test_main.cpp)
 target_include_directories(genesis_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core ${CMAKE_CURRENT_SOURCE_DIR}/src/posix)
@@ -138,6 +153,9 @@ install(TARGETS genesis_core genesis genesisd
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(TARGET mount_genesis)
+    install(TARGETS mount_genesis RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 install(FILES include/genesis/api.h include/genesis/client.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/genesis)
 install(FILES packaging/systemd/genesisd.service DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/system)
 install(FILES packaging/openrc/genesisd DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/init.d)

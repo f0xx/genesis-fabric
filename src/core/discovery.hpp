@@ -21,4 +21,11 @@ struct Beacon {
 size_t beacon_encode(uint8_t* dst, size_t cap, const Beacon& b);
 bool beacon_decode(const uint8_t* src, size_t len, Beacon& b);
 
+/* Trailer after the v1 name. Older decoders stop at the name and ignore it.
+ * names[][32] is the export name, rw is 1 for read-write. count 0 leaves len unchanged. */
+size_t beacon_append_exports(uint8_t* dst, size_t cap, size_t len, const char names[][32], const uint8_t* rw,
+                             int count);
+/* 0 when there is no trailer or it is truncated. Does not fail beacon_decode. */
+int beacon_read_exports(const uint8_t* src, size_t len, char names[][32], uint8_t* rw, int cap);
+
 }  // namespace genesis

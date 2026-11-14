@@ -16,7 +16,7 @@ Header, 48 bytes, all multi-byte fields big-endian:
 | 44 | payload length |
 | 46 | extension length |
 
-Types: Hello 1, HelloAck 2, KeyConfirm 3, Data 4, Fec 5, Ack 6, Nack 7, Fin 8, FinAck 9, Gossip 10, Ping 11, Pong 12, PeerUpdate 13.
+Types: Hello 1, HelloAck 2, KeyConfirm 3, Data 4, Fec 5, Ack 6, Nack 7, Fin 8, FinAck 9, Gossip 10, Ping 11, Pong 12, PeerUpdate 13, VFS 14.
 
 A version other than 1 is rejected. Extensions are skipped by length, so a later minor header can grow without a new magic.
 
@@ -42,6 +42,7 @@ Feature bits in the hello, masked together by both peers:
 | 12 | jitter | receiver holds out-of-order data before treating a gap as loss |
 | 13 | resume | a partial file with the same name and size continues at a chunk boundary |
 | 14 | fec-accept | this peer can run FEC if the other peer wants it |
+| 15 | VFS | this node publishes filesystem exports. Set on discovery beacons only, not on a file-transfer hello |
 
 A bit the peer does not set is turned off locally. NACK runs only when both sides set it. FEC runs when at least one side sets the FEC bit and the other side sets either FEC or fec-accept. Wi-Fi sets FEC. Ethernet and an unknown link set fec-accept, so they take parity from a wi-fi peer and do not force it on another ethernet peer. Cellular sets neither.
 
@@ -89,4 +90,8 @@ The retransmission timeout starts at `max(3 * min_rtt, 20 ms)`, doubles on each 
 
 Gossip plaintext is a monotonic sequence, a timestamp, and node records (id, next hop, metric, rtt, bandwidth). Replays are rejected. The session AEAD key protects it. There is no plaintext network token.
 
-Discovery beacons are not part of the file connection. Magic `GDIS`, version 1, port, features, 16-byte id, name. Group `239.255.42.19`, port `37421`.
+Discovery beacons are not part of the file connection. Magic `GDIS`, version 1, port, features, 16-byte id, name. Group `239.255.42.19`, port `37421`. A beacon may continue after the name with `0xE1`, a count, and each export name plus a read-write flag. A decoder that stops at the name ignores that trailer.
+
+## VFS
+
+Type 14 is a request/response filesystem channel demuxed before the file engine. The record layout, the LZSS seal, and the fragment rules are in `docs/VFS.md`. This version's daemon takes type 14 off the socket before a file session is created. A daemon from before that demux can open an empty file session for the datagram and then ignore the unknown type. File-transfer hellos do not advertise bit 15, and a file transfer to an older peer does not send type 14.

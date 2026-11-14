@@ -46,6 +46,7 @@ struct Req {
     char host[128]{};
     char output[512]{};
     char via[512]{};
+    char expname[32]{};
     int port = 37420;
     genesis_config cfg{};
 };
@@ -57,6 +58,7 @@ void apply_kv(Req* r, const char* key, const char* val) {
     else if (std::strcmp(key, "output") == 0) std::snprintf(r->output, sizeof(r->output), "%s", val);
     else if (std::strcmp(key, "port") == 0) r->port = ::atoi(val);
     else if (std::strcmp(key, "via") == 0) std::snprintf(r->via, sizeof(r->via), "%s", val);
+    else if (std::strcmp(key, "export") == 0) std::snprintf(r->expname, sizeof(r->expname), "%s", val);
     else genesis_config_set(&r->cfg, key, val);
 }
 
@@ -207,6 +209,15 @@ int genesis_control_dispatch(int client_fd, const genesis_config* cfg, genesis_n
             return 0;
         }
         return 1;
+    }
+    if (std::strcmp(req.command, "vfs") == 0) {
+        if (!node) {
+            dprintf(client_fd, "ERR %d vfs needs a daemon\n", GENESIS_ERR_ARGS);
+            ::close(client_fd);
+            return 0;
+        }
+        if (genesis::node_vfs_attach(reinterpret_cast<genesis::Node*>(node), client_fd, req.expname) != 0) return 0;
+        return 2;
     }
     dprintf(client_fd, "ERR %d unknown command\n", GENESIS_ERR_ARGS);
     ::close(client_fd);

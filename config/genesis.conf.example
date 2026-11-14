@@ -32,3 +32,5 @@ verbose = 0
 # expect_pub_hex = <64 hex chars of the peer X25519 public key>
 # chroot_dir = /var/lib/genesis
 # drop_user = genesis
+# export = photos /home/foxx/photos rw
+# export = pub /srv/pub ro

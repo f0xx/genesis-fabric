@@ -23,7 +23,9 @@ enum FrameType : uint8_t {
     kGossip = 10,
     kPing = 11,
     kPong = 12,
-    kPeerUpdate = 13
+    kPeerUpdate = 13,
+    /* Filesystem RPC. Old peers ignore this type. It is not a file transfer. */
+    kVfs = 14
 };
 
 enum HeaderFlag : uint16_t { kFlagEncrypted = 1u << 0 };
@@ -43,7 +45,9 @@ enum FeatureBit : uint32_t {
     kFeatDht = 1u << 11,
     kFeatJitter = 1u << 12,
     kFeatResume = 1u << 13,
-    kFeatFecAccept = 1u << 14
+    kFeatFecAccept = 1u << 14,
+    /* Discovery advertises NFS-style exports. File transfers do not set this. */
+    kFeatVfs = 1u << 15
 };
 
 struct Header {

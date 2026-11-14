@@ -5,6 +5,7 @@
 #include "log.hpp"
 #include "udp.hpp"
 #include "util.hpp"
+#include "vfs_hub.hpp"
 #include "wire.hpp"
 
 #include <cerrno>
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -470,6 +472,7 @@ struct Node {
     uint64_t last_beacon = 0;
     genesis_stats last{};
     int ctrl_fd = -1;
+    VfsHub* vfs = nullptr;
     bool oneshot = false;
     char oneshot_path[512]{};
     uint64_t ctrl_prog_us = 0;
@@ -506,6 +509,11 @@ Node* node_create(const genesis_config* cfg) {
         if (n->disco.open("0.0.0.0", kDiscoveryPort, 1 << 20, false)) n->disco.join_multicast(kDiscoveryGroup);
     }
     if (cfg->pinned_core >= 0) pin_thread(cfg->pinned_core);
+    n->vfs = vfs_hub_create(cfg);
+    if (!n->vfs) {
+        delete n;
+        return nullptr;
+    }
     return n;
 }
 
@@ -526,17 +534,40 @@ int node_poll(Node* n, int timeout_ms) {
         Beacon b;
         b.port = n->sock.local_port();
         b.features = kFeatFile | kFeatBbr | kFeatDiscovery;
+        if (n->cfg.export_count > 0) b.features |= kFeatVfs;
         std::snprintf(b.name, sizeof(b.name), "%s", n->cfg.node_name);
-        uint8_t pkt[64];
+        uint8_t pkt[512];
         size_t len = beacon_encode(pkt, sizeof(pkt), b);
+        if (len && n->cfg.export_count > 0)
+            len = beacon_append_exports(pkt, sizeof(pkt), len, n->cfg.export_name, n->cfg.export_rw, n->cfg.export_count);
         if (len && n->disco.fd() >= 0) n->disco.send_to(pkt, len, kDiscoveryGroup, kDiscoveryPort);
         n->last_beacon = now;
     }
-    uint8_t buf[1600];
+    pollfd pf[9];
+    pf[0].fd = n->sock.fd();
+    pf[0].events = POLLIN;
+    pf[0].revents = 0;
+    int extra_fds[8];
+    int extra = vfs_hub_fill_fds(n->vfs, extra_fds, 8);
+    for (int i = 0; i < extra; ++i) {
+        pf[1 + i].fd = extra_fds[i];
+        pf[1 + i].events = POLLIN;
+        pf[1 + i].revents = 0;
+    }
+    int pr = ::poll(pf, static_cast<nfds_t>(1 + extra), timeout_ms);
+    if (pr > 0) {
+        for (int i = 0; i < extra; ++i)
+            if (pf[1 + i].revents & (POLLIN | POLLHUP | POLLERR)) vfs_hub_on_fd(n->vfs, extra_fds[i]);
+    }
+    uint8_t buf[2048];
     uint32_t addr = 0;
     uint16_t port = 0;
-    int got = n->sock.recv_from(buf, sizeof(buf), &addr, &port, timeout_ms);
-    if (got > 0) {
+    int got = 0;
+    if (pr > 0 && (pf[0].revents & (POLLIN | POLLERR | POLLHUP)))
+        got = n->sock.recv_from(buf, sizeof(buf), &addr, &port, 0);
+    bool vfs_pkt = got > 0 && vfs_is_packet(buf, static_cast<size_t>(got));
+    if (vfs_pkt) vfs_hub_packet(n->vfs, n->sock, buf, static_cast<size_t>(got), addr, port);
+    if (got > 0 && !vfs_pkt) {
         Session* s = find_session(n, 0);
         if (!s) {
             for (auto& slot : n->sessions) {
@@ -653,6 +684,10 @@ int node_arm_recv(Node* n, int client_fd, const char* path, const genesis_config
         std::snprintf(n->cfg.drop_user, sizeof(n->cfg.drop_user), "%s", keep.drop_user);
         std::snprintf(n->cfg.pid_file, sizeof(n->cfg.pid_file), "%s", keep.pid_file);
         std::snprintf(n->cfg.control, sizeof(n->cfg.control), "%s", keep.control);
+        n->cfg.export_count = keep.export_count;
+        std::memcpy(n->cfg.export_name, keep.export_name, sizeof(n->cfg.export_name));
+        std::memcpy(n->cfg.export_path, keep.export_path, sizeof(n->cfg.export_path));
+        std::memcpy(n->cfg.export_rw, keep.export_rw, sizeof(n->cfg.export_rw));
     }
     std::snprintf(n->oneshot_path, sizeof(n->oneshot_path), "%s", path);
     n->oneshot = true;
@@ -671,7 +706,17 @@ void node_destroy(Node* n) {
         delete s.eng;
         if (s.io.f) std::fclose(s.io.f);
     }
+    vfs_hub_destroy(n->vfs);
     delete n;
+}
+
+uint16_t node_port(const Node* n) {
+    return n ? n->sock.local_port() : 0;
+}
+
+int node_vfs_attach(Node* n, int client_fd, const char* export_name) {
+    if (!n || !n->vfs) return -1;
+    return vfs_hub_attach(n->vfs, client_fd, export_name);
 }
 
 int node_stats(const Node* n, genesis_stats* stats) {

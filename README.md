@@ -34,7 +34,7 @@ genesis recv -o /tmp/out.bin -p 37420
 genesis send -p 37420 ./file.bin 192.168.4.100
 ```
 
-Progress (bar, percent, rate, ETA) is written to stderr. A config file is `-c path` with `key = value` lines. An interrupted receive continues from the last flushed chunk when the destination and its `.genesis` sidecar are still there. `--control PATH` or `--control HOST:PORT` sends that same `send` or `recv` to a running `genesisd` instead of calling the library. The operator manual is `docs/user-guide.md`. See also `config/genesis.conf.example` and `docs/USAGE.md`.
+Progress (bar, percent, rate, ETA) is written to stderr. A config file is `-c path` with `key = value` lines. An interrupted receive continues from the last flushed chunk when the destination and its `.genesis` sidecar are still there. `--control PATH` or `--control HOST:PORT` sends that same `send` or `recv` to a running `genesisd` instead of calling the library. `export` lines publish directories, and `mount.genesis` mounts one over the same protocol. The operator manual is `docs/user-guide.md`. See also `config/genesis.conf.example`, `docs/USAGE.md`, and `docs/VFS.md`.
 
 ## Layout
 
@@ -44,7 +44,8 @@ Progress (bar, percent, rate, ETA) is written to stderr. A config file is `-c pa
 | `src/posix` | UDP, session, config jail, daemonize |
 | `src/embedded` | Entropy hook for a socket-free static library |
 | `apps/cli`, `apps/daemon` | Thin clients |
-| `tests/test_main.cpp` | Vectors, FEC, engine, jail, SPSC ring |
+| `apps/mount` | `mount.genesis`, the FUSE client |
+| `tests/test_main.cpp` | Vectors, FEC, engine, jail, VFS, SPSC ring |
 | `packaging` | systemd and OpenRC, not installed into the running system by the build |
 | `docker` | Alpine image that builds and runs `ctest` |
 
@@ -56,3 +57,4 @@ Progress (bar, percent, rate, ETA) is written to stderr. A config file is `-c pa
 - `docs/CHROOT_AUDIT.md`
 - `docs/EMBEDDED.md`
 - `docs/USAGE.md`
+- `docs/VFS.md`

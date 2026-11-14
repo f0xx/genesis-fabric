@@ -1,4 +1,5 @@
 #include "genesis/client.hpp"
+#include "vfs_codec.hpp"
 
 #include <atomic>
 #include <cerrno>
@@ -7,11 +8,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <csignal>
+#include <poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -27,6 +32,10 @@ void usage() {
                  "  genesis discover [--timeout MS]\n"
                  "  genesis stun\n"
                  "  genesis dht HOST[:PORT]\n"
+                 "  genesis showmount [HOST[:PORT]]\n"
+                 "  genesis tree HOST[:PORT]:/EXPORT[/PATH]\n"
+                 "  genesis vfs-serve [--export NAME=PATH[,ro]] [--control PATH]\n"
+                 "  genesis mount [mount.genesis options] SPEC MOUNTPOINT\n"
                  "  genesis version\n"
                  "Options:\n"
                  "  -c FILE          config file (key=value)\n"
@@ -175,6 +184,10 @@ int apply_global(Opt& o, int& i, int argc, char** argv) {
         if (!take(i, argc, argv, &v)) return -1;
         o.discover_ms = std::atoi(v);
         return 0;
+    }
+    if (std::strcmp(a, "--export") == 0) {
+        if (!take(i, argc, argv, &v)) return -1;
+        return o.cfg.set("export", v) == GENESIS_OK ? 0 : -1;
     }
     return 1;
 }
@@ -404,6 +417,70 @@ int control_call(const Opt& o, const char* command, const char* file, const char
     return 1;
 }
 
+volatile std::sig_atomic_t g_vfs_stop = 0;
+
+void on_vfs_stop(int) { g_vfs_stop = 1; }
+
+int exec_mount(int argc, char** argv) {
+    char self[4096];
+    ssize_t n = ::readlink("/proc/self/exe", self, sizeof(self) - 1);
+    std::string bin = "mount.genesis";
+    if (n > 0) {
+        self[n] = '\0';
+        std::string path(self, static_cast<size_t>(n));
+        auto slash = path.find_last_of('/');
+        if (slash != std::string::npos) {
+            std::string cand = path.substr(0, slash + 1) + "mount.genesis";
+            if (::access(cand.c_str(), X_OK) == 0) bin = cand;
+        }
+    }
+    std::vector<char*> args;
+    args.push_back(const_cast<char*>(bin.c_str()));
+    for (int i = 2; i < argc; ++i) args.push_back(argv[i]);
+    args.push_back(nullptr);
+    if (bin.find('/') == std::string::npos) ::execvp(bin.c_str(), args.data());
+    else ::execv(bin.c_str(), args.data());
+    std::perror("mount.genesis");
+    return 127;
+}
+
+int tree_walk(genesis_vfs* session, const std::string& path, int depth) {
+    if (depth > 40) return 0;
+    uint8_t data[48 * 1024];
+    uint64_t cookie = 0;
+    for (;;) {
+        genesis_vfs_req req{};
+        req.op = GENESIS_VFS_READDIR;
+        req.path = path.c_str();
+        req.offset = cookie;
+        genesis_vfs_res res{};
+        res.data = data;
+        res.data_cap = sizeof(data);
+        int rc = genesis_vfs_call(session, &req, &res, 8000);
+        if (rc != GENESIS_OK) {
+            std::fprintf(stderr, "readdir %s failed (%d)\n", path.c_str(), rc);
+            return 1;
+        }
+        if (res.status) {
+            std::fprintf(stderr, "readdir %s: %s\n", path.c_str(), std::strerror(res.status));
+            return 1;
+        }
+        size_t io = 0;
+        bool any = false;
+        genesis::VfsDirEnt ent;
+        while (genesis::vfs_dir_next(data, res.data_len, &io, &ent)) {
+            any = true;
+            cookie = ent.cookie;
+            std::string child = path.empty() ? std::string(ent.name) : path + "/" + ent.name;
+            std::printf("%s%s\n", child.c_str(), S_ISDIR(ent.mode) ? "/" : "");
+            std::fflush(stdout);
+            if (S_ISDIR(ent.mode) && tree_walk(session, child, depth + 1) != 0) return 1;
+        }
+        if (!any || res.data_len < 48 * 1024) break;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -461,7 +538,7 @@ int main(int argc, char** argv) {
                 std::strcmp(argv[i], "--listen") == 0 || std::strcmp(argv[i], "--link") == 0 ||
                 std::strcmp(argv[i], "--fec") == 0 || std::strcmp(argv[i], "--nack") == 0 ||
                 std::strcmp(argv[i], "--jitter-ms") == 0 || std::strcmp(argv[i], "--via") == 0 ||
-                std::strcmp(argv[i], "--control") == 0 ||
+                std::strcmp(argv[i], "--control") == 0 || std::strcmp(argv[i], "--export") == 0 ||
                 std::strcmp(argv[i], "-o") == 0 || std::strcmp(argv[i], "--output") == 0) {
                 ++i;
             }
@@ -571,6 +648,84 @@ int main(int argc, char** argv) {
                      static_cast<unsigned long long>(stats.bytes_wire_tx));
         return 0;
     }
+    if (cmd == "showmount") {
+        std::string host;
+        int port = opt.peer_port;
+        const char* hostp = nullptr;
+        if (np >= 1) {
+            host = pos[0];
+            auto colon = host.rfind(':');
+            if (colon != std::string::npos && host.find(':') == colon) {
+                port = std::atoi(host.c_str() + colon + 1);
+                host.resize(colon);
+            }
+            hostp = host.c_str();
+        }
+        char out[8192];
+        int rc = genesis_showmount(&opt.cfg.raw(), hostp, static_cast<uint16_t>(port), opt.discover_ms, out, sizeof(out));
+        if (rc != GENESIS_OK) {
+            std::fprintf(stderr, "showmount failed (%d)\n", rc);
+            return 1;
+        }
+        std::fputs(out, stdout);
+        return 0;
+    }
+    if (cmd == "tree") {
+        if (np < 1) {
+            usage();
+            return 2;
+        }
+        std::string spec = pos[0];
+        auto sep = spec.find(":/");
+        if (sep == std::string::npos) {
+            usage();
+            return 2;
+        }
+        std::string hp = spec.substr(0, sep);
+        std::string rest = spec.substr(sep + 2);
+        std::string exp = rest;
+        std::string sub;
+        auto slash = rest.find('/');
+        if (slash != std::string::npos) {
+            exp = rest.substr(0, slash);
+            sub = rest.substr(slash + 1);
+        }
+        int port = opt.peer_port;
+        auto colon = hp.rfind(':');
+        if (colon != std::string::npos) {
+            port = std::atoi(hp.c_str() + colon + 1);
+            hp.resize(colon);
+        }
+        genesis_vfs* session = genesis_vfs_connect(&opt.cfg.raw(), hp.c_str(), static_cast<uint16_t>(port), exp.c_str(), 8000);
+        if (!session) {
+            std::fprintf(stderr, "tree: cannot reach %s:%d export %s\n", hp.c_str(), port, exp.c_str());
+            return 1;
+        }
+        int rc = tree_walk(session, sub, 0);
+        genesis_vfs_close(session);
+        return rc;
+    }
+    if (cmd == "vfs-serve") {
+        if (opt.port_set) opt.cfg.raw().bind_port = static_cast<uint16_t>(opt.peer_port);
+        std::signal(SIGINT, on_vfs_stop);
+        std::signal(SIGTERM, on_vfs_stop);
+        genesis_vfs_server* server = genesis_vfs_server_start(&opt.cfg.raw());
+        if (!server) {
+            std::fprintf(stderr, "vfs-serve failed to bind\n");
+            return 1;
+        }
+        if (opt.cfg.raw().ssh_pipe) {
+            std::printf("ready %u\n", genesis_vfs_server_port(server));
+            std::fflush(stdout);
+        } else {
+            std::fprintf(stderr, "vfs serving %d export(s) on port %u\n", opt.cfg.raw().export_count,
+                         genesis_vfs_server_port(server));
+        }
+        while (!g_vfs_stop && genesis_vfs_server_running(server)) ::poll(nullptr, 0, 200);
+        genesis_vfs_server_stop(server);
+        return 0;
+    }
+    if (cmd == "mount") return exec_mount(argc, argv);
     usage();
     return 2;
 }

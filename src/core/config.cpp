@@ -76,7 +76,7 @@ void genesis_config_init(genesis_config* cfg) {
 int genesis_config_set(genesis_config* cfg, const char* key, const char* value) {
     if (!cfg || !key || !value) return GENESIS_ERR_ARGS;
     char k[64];
-    char v[256];
+    char v[768];
     std::snprintf(k, sizeof(k), "%s", key);
     std::snprintf(v, sizeof(v), "%s", value);
     genesis::trim(k);
@@ -181,8 +181,69 @@ int genesis_config_set(genesis_config* cfg, const char* key, const char* value) 
         else return GENESIS_ERR_ARGS;
     } else if (eq("routes") || eq("via")) {
         genesis::copy_cstr(cfg->routes, sizeof(cfg->routes), v);
-    } else if (eq("control")) {
+    }     else if (eq("control")) {
         genesis::copy_cstr(cfg->control, sizeof(cfg->control), v);
+    } else if (eq("export")) {
+        if (cfg->export_count >= GENESIS_EXPORT_MAX) return GENESIS_ERR_ARGS;
+        char buf[768];
+        std::snprintf(buf, sizeof(buf), "%s", v);
+        char name[32];
+        char path[256];
+        int rw = 1;
+        char* eqpos = std::strchr(buf, '=');
+        char* sp = std::strchr(buf, ' ');
+        if (eqpos && (!sp || eqpos < sp)) {
+            *eqpos = '\0';
+            if (std::strlen(buf) == 0 || std::strlen(buf) > 31) return GENESIS_ERR_ARGS;
+            std::memcpy(name, buf, std::strlen(buf) + 1);
+            char* rest = eqpos + 1;
+            size_t L = std::strlen(rest);
+            if (L > 3 && std::strcmp(rest + L - 3, ",ro") == 0) {
+                rw = 0;
+                rest[L - 3] = '\0';
+            } else if (L > 3 && std::strcmp(rest + L - 3, ",rw") == 0) {
+                rest[L - 3] = '\0';
+            }
+            if (std::strlen(rest) == 0 || std::strlen(rest) > 255) return GENESIS_ERR_ARGS;
+            std::memcpy(path, rest, std::strlen(rest) + 1);
+        } else {
+            if (!sp) return GENESIS_ERR_ARGS;
+            *sp = '\0';
+            if (std::strlen(buf) == 0 || std::strlen(buf) > 31) return GENESIS_ERR_ARGS;
+            std::memcpy(name, buf, std::strlen(buf) + 1);
+            char* rest = sp + 1;
+            while (*rest == ' ') ++rest;
+            char* last = std::strrchr(rest, ' ');
+            if (last && (std::strcmp(last + 1, "ro") == 0 || std::strcmp(last + 1, "rw") == 0)) {
+                rw = std::strcmp(last + 1, "rw") == 0 ? 1 : 0;
+                *last = '\0';
+                while (last > rest && last[-1] == ' ') {
+                    --last;
+                    *last = '\0';
+                }
+            }
+            if (std::strlen(rest) == 0 || std::strlen(rest) > 255) return GENESIS_ERR_ARGS;
+            std::memcpy(path, rest, std::strlen(rest) + 1);
+        }
+        if (!name[0] || std::strlen(name) > 31 || !path[0]) return GENESIS_ERR_ARGS;
+        for (const char* p = name; *p; ++p) {
+            char c = *p;
+            bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' ||
+                      c == '_' || c == '-' || c == '+';
+            if (!ok) return GENESIS_ERR_ARGS;
+        }
+        if (std::strchr(path, '\n') || std::strchr(path, '\\')) return GENESIS_ERR_ARGS;
+        for (const char* p = path; *p;) {
+            if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0') && (p == path || p[-1] == '/'))
+                return GENESIS_ERR_ARGS;
+            ++p;
+        }
+        for (int i = 0; i < cfg->export_count; ++i)
+            if (std::strcmp(cfg->export_name[i], name) == 0) return GENESIS_ERR_ARGS;
+        int slot = cfg->export_count++;
+        genesis::copy_cstr(cfg->export_name[slot], sizeof(cfg->export_name[slot]), name);
+        genesis::copy_cstr(cfg->export_path[slot], sizeof(cfg->export_path[slot]), path);
+        cfg->export_rw[slot] = static_cast<uint8_t>(rw);
     } else
         return GENESIS_ERR_ARGS;
     return GENESIS_OK;
@@ -192,7 +253,7 @@ int genesis_config_load(genesis_config* cfg, const char* path) {
     if (!cfg || !path) return GENESIS_ERR_ARGS;
     FILE* f = std::fopen(path, "r");
     if (!f) return GENESIS_ERR_IO;
-    char line[512];
+    char line[1024];
     while (std::fgets(line, sizeof(line), f)) {
         genesis::trim(line);
         if (!line[0] || line[0] == '#') continue;

@@ -14,7 +14,7 @@ extern "C" {
 #endif
 
 #define GENESIS_VERSION_MAJOR 1
-#define GENESIS_VERSION_MINOR 1
+#define GENESIS_VERSION_MINOR 2
 #define GENESIS_VERSION_PATCH 0
 
 #define GENESIS_PROTO_VERSION 1
@@ -94,6 +94,12 @@ typedef struct genesis_config {
     int link_hint;   /* GENESIS_LINK_*. 0 detects from the default route, then RTT. */
     char routes[512]; /* extra host:port paths, comma-separated. Striped with the primary. */
     char control[256]; /* empty: this process uses the library. Otherwise a socket path or host:port. */
+    /* NFS-style exports. Repeated config key "export". rw is 1 for read-write, 0 for read-only. */
+#define GENESIS_EXPORT_MAX 8
+    char export_name[GENESIS_EXPORT_MAX][32];
+    char export_path[GENESIS_EXPORT_MAX][256];
+    uint8_t export_rw[GENESIS_EXPORT_MAX];
+    int export_count;
 } genesis_config;
 
 typedef struct genesis_stats {
@@ -242,8 +248,107 @@ int genesis_control_listen(const char* spec, char* err, size_t err_cap);
 /* Accept one client, or -1 if none is waiting. The returned fd is blocking. */
 int genesis_control_take(int listen_fd);
 /* Read one send/recv request. send runs here and closes client_fd (returns 0).
- * recv arms the daemon and keeps client_fd open (returns 1). Errors return 0 after closing. */
+ * recv arms the daemon and keeps client_fd open (returns 1). Errors return 0 after closing.
+ * command=vfs attaches the fd to the daemon and returns 2; the daemon keeps the fd. */
 int genesis_control_dispatch(int client_fd, const genesis_config* cfg, genesis_node* node);
+
+/* UDP port the daemon socket actually bound. 0 if node is NULL. */
+uint16_t genesis_node_port(const genesis_node* node);
+
+/* Filesystem RPC. Ops are the POSIX set a mount needs: list, stat, read, write,
+ * create, mkdir, unlink, rmdir, rename, chmod, truncate, symlink, readlink,
+ * utimens, link, statfs, readdir. status in the result is a positive errno. */
+enum {
+    GENESIS_VFS_LIST = 1,
+    GENESIS_VFS_STAT = 2,
+    GENESIS_VFS_READDIR = 3,
+    GENESIS_VFS_READ = 4,
+    GENESIS_VFS_WRITE = 5,
+    GENESIS_VFS_CREATE = 6,
+    GENESIS_VFS_MKDIR = 7,
+    GENESIS_VFS_UNLINK = 8,
+    GENESIS_VFS_RMDIR = 9,
+    GENESIS_VFS_RENAME = 10,
+    GENESIS_VFS_CHMOD = 11,
+    GENESIS_VFS_TRUNCATE = 12,
+    GENESIS_VFS_SYMLINK = 13,
+    GENESIS_VFS_READLINK = 14,
+    GENESIS_VFS_UTIMENS = 15,
+    GENESIS_VFS_LINK = 16,
+    GENESIS_VFS_STATFS = 17
+};
+
+/* WRITE/CREATE flags. RENAME reuses bit 0 as noreplace and bit 1 as exchange.
+ * UTIMENS: bit 0 atime omit, bit 1 mtime omit, bit 2 atime now, bit 3 mtime now. */
+enum {
+    GENESIS_VFS_CREAT = 1,
+    GENESIS_VFS_EXCL = 2,
+    GENESIS_VFS_TRUNC = 4,
+    GENESIS_VFS_NOREPLACE = 1,
+    GENESIS_VFS_EXCHANGE = 2,
+    GENESIS_VFS_ATIME_OMIT = 1,
+    GENESIS_VFS_MTIME_OMIT = 2,
+    GENESIS_VFS_ATIME_NOW = 4,
+    GENESIS_VFS_MTIME_NOW = 8
+};
+
+typedef struct genesis_vfs_req {
+    int op;
+    uint32_t flags;
+    uint32_t mode;
+    uint64_t offset;
+    uint64_t size;
+    uint64_t mtime_ns;
+    uint64_t atime_ns;
+    const char* path; /* inside the export. NULL and "" are the export root. */
+    const char* name; /* rename/link destination, or symlink target */
+    const uint8_t* data;
+    uint32_t data_len;
+} genesis_vfs_req;
+
+typedef struct genesis_vfs_res {
+    int status; /* 0 or a positive errno */
+    uint32_t mode;
+    uint32_t nlink;
+    uint32_t uid;
+    uint32_t gid;
+    uint64_t size;
+    uint64_t mtime_ns;
+    uint64_t atime_ns;
+    char name[512]; /* readlink target */
+    uint8_t* data;  /* caller buffer. readdir and read write here. */
+    uint32_t data_len;
+    uint32_t data_cap;
+} genesis_vfs_res;
+
+typedef struct genesis_vfs genesis_vfs;
+typedef struct genesis_vfs_server genesis_vfs_server;
+
+/* UDP session to host:port. export_name may be empty to only list exports.
+ * Blocks through the handshake. timeout_ms applies to the handshake. */
+genesis_vfs* genesis_vfs_connect(const genesis_config* cfg, const char* host, uint16_t port,
+                                 const char* export_name, int timeout_ms);
+/* Same ops over a daemon control socket (unix path, unix:path, or host:port).
+ * The daemon executes them on its own exports. No second UDP handshake. */
+genesis_vfs* genesis_vfs_connect_control(const char* spec, const char* export_name, int timeout_ms);
+void genesis_vfs_close(genesis_vfs* session);
+/* GENESIS_OK means the RPC completed. Filesystem errors are res->status. */
+int genesis_vfs_call(genesis_vfs* session, const genesis_vfs_req* req, genesis_vfs_res* res, int timeout_ms);
+
+/* Foreground export server used by `genesis vfs-serve` and by tests.
+ * Binds cfg->bind_host / bind_port (0 picks an ephemeral port). */
+genesis_vfs_server* genesis_vfs_server_start(const genesis_config* cfg);
+uint16_t genesis_vfs_server_port(const genesis_vfs_server* server);
+/* Non-zero while the server thread is still in its poll loop. */
+int genesis_vfs_server_running(const genesis_vfs_server* server);
+void genesis_vfs_server_stop(genesis_vfs_server* server);
+/* Test hook. every > 1 drops that fraction of outgoing VFS datagrams. 0 disables. */
+void genesis_vfs_server_lose(genesis_vfs_server* server, int every);
+
+/* host NULL: listen for discovery beacons and write one line per peer.
+ * host set: ask that node for its export table. Lines are "name rw|ro path". */
+int genesis_showmount(const genesis_config* cfg, const char* host, uint16_t port, int timeout_ms, char* out,
+                      size_t out_cap);
 
 #ifdef __cplusplus
 }
