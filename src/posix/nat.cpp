@@ -75,6 +75,8 @@ void nat_hub_packet(NatHub* hub, UdpSocket& sock, const uint8_t* data, size_t n,
         for (auto& s : hub->slots) {
             if (s.used && same_room(s, msg.room) && std::strcmp(s.name, msg.name) == 0) slot = &s;
         }
+        bool keep_cookie = slot && fresh(*slot, now);
+        uint64_t kept = keep_cookie ? slot->cookie : 0;
         if (!slot) {
             for (auto& s : hub->slots)
                 if (!s.used || !fresh(s, now)) {
@@ -89,8 +91,12 @@ void nat_hub_packet(NatHub* hub, UdpSocket& sock, const uint8_t* data, size_t n,
         std::memcpy(slot->name, msg.name, sizeof(slot->name));
         slot->addr = addr;
         slot->port = port;
-        random_bytes(reinterpret_cast<uint8_t*>(&slot->cookie), sizeof(slot->cookie));
-        if (slot->cookie == 0) slot->cookie = 1;
+        if (keep_cookie && kept) {
+            slot->cookie = kept;
+        } else {
+            random_bytes(reinterpret_cast<uint8_t*>(&slot->cookie), sizeof(slot->cookie));
+            if (slot->cookie == 0) slot->cookie = 1;
+        }
         slot->last_us = now;
         NatMsg reply;
         reply.type = kNatRegistered;
@@ -149,6 +155,7 @@ struct GenesisTunSlot {
     bool live = false;
     uint32_t seq = 0;
     uint64_t sent = 0;
+    uint64_t first = 0;
     std::vector<uint8_t> data;
 };
 
@@ -288,7 +295,7 @@ void send_kind(genesis_path* p, NatMsg msg) {
 void remember_peer_cookie(genesis_path* p, uint64_t cookie) {
     if (!cookie) return;
     std::lock_guard<std::mutex> lock(p->mu);
-    if (!p->peer_cookie) p->peer_cookie = cookie;
+    p->peer_cookie = cookie;
     if (p->mode == 0) p->mode = 2;
 }
 
@@ -442,7 +449,12 @@ void tun_retx(genesis_path* p, uint64_t now) {
     {
         std::lock_guard<std::mutex> lock(p->mu);
         for (auto& slot : p->tunq) {
-            if (!slot.live || now - slot.sent < 30000) continue;
+            if (!slot.live) continue;
+            if (slot.first && now - slot.first > 1200000) {
+                slot.live = false;
+                continue;
+            }
+            if (now - slot.sent < 150000) continue;
             slot.sent = now;
             due.push_back({slot.seq, slot.data});
         }
@@ -472,6 +484,7 @@ void tun_read(genesis_path* p) {
         slot->live = true;
         slot->seq = seq;
         slot->sent = monotonic_us();
+        slot->first = slot->sent;
         slot->data.assign(buf, buf + n);
     }
     NatMsg msg;
@@ -507,11 +520,14 @@ void rx_loop(genesis_path* p) {
         int pr = ::poll(pf, static_cast<nfds_t>(nfd), 20);
         uint64_t now = monotonic_us();
         if (pr > 0 && (pf[0].revents & POLLIN)) {
-            uint8_t buf[2048];
-            uint32_t addr = 0;
-            uint16_t port = 0;
-            int n = p->sock.recv_from(buf, sizeof(buf), &addr, &port, 0);
-            if (n > 0) handle_bytes(p, buf, static_cast<size_t>(n), addr, port);
+            for (;;) {
+                uint8_t buf[2048];
+                uint32_t addr = 0;
+                uint16_t port = 0;
+                int n = p->sock.recv_from(buf, sizeof(buf), &addr, &port, 0);
+                if (n <= 0) break;
+                handle_bytes(p, buf, static_cast<size_t>(n), addr, port);
+            }
         }
         if (tun_slot >= 0 && pr > 0 && (pf[tun_slot].revents & POLLIN)) tun_read(p);
         tun_retx(p, now);
@@ -747,12 +763,15 @@ extern "C" int genesis_path_measure(genesis_path* path, genesis_path_report* rep
         jit += d;
     }
     if (got > 1) jit /= static_cast<uint64_t>(got - 1);
-    int lo = 200, hi = 1400, best = 0;
+    int lo = 64, hi = 1400, best = 0;
     uint32_t id = 100;
+    int probe_ms = static_cast<int>(avg / 1000ull * 3);
+    if (probe_ms < 200) probe_ms = 200;
+    if (probe_ms > 800) probe_ms = 800;
     while (lo <= hi) {
         int mid = (lo + hi) / 2;
-        bool ok = genesis::probe_once(path, id++, static_cast<size_t>(mid), 80, nullptr) ||
-                  genesis::probe_once(path, id++, static_cast<size_t>(mid), 80, nullptr);
+        bool ok = genesis::probe_once(path, id++, static_cast<size_t>(mid), probe_ms, nullptr) ||
+                  genesis::probe_once(path, id++, static_cast<size_t>(mid), probe_ms, nullptr);
         if (ok) {
             best = mid;
             lo = mid + 1;
@@ -787,7 +806,10 @@ extern "C" int genesis_path_measure(genesis_path* path, genesis_path_report* rep
 extern "C" int genesis_path_bench(genesis_path* path, uint64_t nbytes, genesis_path_report* report) {
     if (!path || !report || nbytes == 0) return GENESIS_ERR_ARGS;
     if (genesis_path_measure(path, report) != GENESIS_OK) return GENESIS_ERR_TIMEOUT;
-    const size_t chunk = 1000;
+    size_t chunk = 1000;
+    if (path->udp_mtu >= 96 && static_cast<size_t>(path->udp_mtu) < chunk + 48)
+        chunk = static_cast<size_t>(path->udp_mtu - 48);
+    if (chunk < 64) chunk = 64;
     uint32_t next = 1;
     uint32_t acked_n = 0;
     uint32_t limit = static_cast<uint32_t>((nbytes + chunk - 1) / chunk);
@@ -823,12 +845,19 @@ extern "C" int genesis_path_bench(genesis_path* path, uint64_t nbytes, genesis_p
     std::lock_guard<std::mutex> lock(path->mu);
     path->bench_bytes = bytes;
     path->bench_us = us;
-    path->goodput_bps = bytes * 1000000ull / us;
+    path->goodput_bps = bytes * 8000000ull / us;
     report->bench_bytes = bytes;
     report->elapsed_us = us;
     report->goodput_bps = path->goodput_bps;
     report->mode = path->mode;
-    return acked_n == limit ? GENESIS_OK : GENESIS_ERR_TIMEOUT;
+    report->udp_payload = path->udp_mtu;
+    report->path_mtu = path->udp_mtu > 0 ? path->udp_mtu + 28 : 0;
+    if (acked_n != limit) {
+        std::snprintf(path->error, sizeof(path->error), "bench incomplete");
+        std::snprintf(report->error, sizeof(report->error), "%s", path->error);
+        return GENESIS_ERR_TIMEOUT;
+    }
+    return GENESIS_OK;
 }
 
 extern "C" int genesis_path_proxy(genesis_path* path, const char* listen_host, uint16_t listen_port, const char* target_host,

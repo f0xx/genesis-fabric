@@ -120,8 +120,7 @@ int vfs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t off, 
             struct stat st {};
             st.st_mode = ent.mode;
             st.st_size = static_cast<off_t>(ent.size);
-            off_t next = static_cast<off_t>(ent.cookie + 2);
-            if (filler(buf, ent.name, &st, next, static_cast<fuse_fill_dir_flags>(0))) return 0;
+            if (filler(buf, ent.name, &st, static_cast<off_t>(ent.cookie + 2), static_cast<fuse_fill_dir_flags>(0))) return 0;
             cookie = ent.cookie;
         }
         if (!any || res.data_len < 32 * 1024) break;
@@ -130,7 +129,7 @@ int vfs_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t off, 
 }
 
 int vfs_read(const char* path, char* buf, size_t size, off_t off, struct fuse_file_info*) {
-    if (size > 65536) size = 65536;
+    if (size > 16384) size = 16384;
     genesis_vfs_req req{};
     req.op = GENESIS_VFS_READ;
     req.path = path;
@@ -145,7 +144,7 @@ int vfs_read(const char* path, char* buf, size_t size, off_t off, struct fuse_fi
 }
 
 int vfs_write(const char* path, const char* buf, size_t size, off_t off, struct fuse_file_info*) {
-    if (size > 65536) size = 65536;
+    if (size > 16384) size = 16384;
     genesis_vfs_req req{};
     req.op = GENESIS_VFS_WRITE;
     req.path = path;

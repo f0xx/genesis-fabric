@@ -10,7 +10,7 @@ genesis path --via 134.17.5.46:37420 --name artc0 --room lab
 genesis path --via 134.17.5.46:37420 --name laptop --peer artc0 --room lab --bench 4194304
 ```
 
-The report is RTT min/avg/max, jitter, the largest UDP payload that round-tripped, the IPv4 MTU that payload implies, punch counts, and goodput. `mode direct` means the punch opened a mapping. `mode relay` means the datagrams still cross the introducer. `--relay` skips the punch. STUN, when it answers, is printed next to the reflexive address the introducer observed.
+The report is RTT min/avg/max, jitter, the largest UDP payload that round-tripped, the IPv4 MTU that payload implies, punch counts, and goodput in bits per second. `mode direct` means the punch opened a mapping. `mode relay` means the datagrams still cross the introducer. `--relay` skips the punch. STUN, when it answers, is printed next to the reflexive address the introducer observed. A keepalive registration keeps the same cookie, so the return path stays valid.
 
 `--listen PORT` and `--target HOST:PORT` are a UDP proxy. A mount or a file transfer aimed at the local port is carried to the peer, so `mount.genesis` does not need its own NAT code:
 
@@ -25,4 +25,4 @@ mount.genesis 127.0.0.1:45000:/box /mnt/lab
 
 `genesis tun` opens `/dev/net/tun`. `--tun` is an IP device, `--tap` is Ethernet. `--addr A.B.C.D/N` assigns that address and brings the device up. The device is not persistent: it disappears when the process exits. Creating it needs `CAP_NET_ADMIN`.
 
-Packets are sequenced, acknowledged, and sent again after 30 ms. The tunnel MTU follows the measured payload. The same path report is printed before the device is handed to the kernel.
+Packets are sequenced and acknowledged. A missing packet is sent again after 150 ms, and a slot that is still unacknowledged after about 1.2 s is released so one stalled flow does not block the device. The tunnel MTU follows the measured payload. The same path report is printed before the device is handed to the kernel.

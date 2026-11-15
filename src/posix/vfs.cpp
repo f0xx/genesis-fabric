@@ -743,14 +743,20 @@ struct VfsHub {
             if (!seal_dg(dg, c.id, c.tx_seq++, c.tx, plain, 12 + len)) return;
             c.last_reply.push_back(std::move(dg));
         }
-        for (const auto& dg : c.last_reply) emit(sock, dg.data(), dg.size(), c.addr, c.port);
+        for (const auto& dg : c.last_reply) {
+            emit(sock, dg.data(), dg.size(), c.addr, c.port);
+            if (c.last_reply.size() > 4) ::usleep(20000);
+        }
     }
 
     void resend_some(UdpSocket& sock, Conn& c, const std::vector<uint8_t>& missing) {
         for (size_t i = 0; i < c.last_reply.size(); ++i) {
             size_t byte = i / 8;
             if (byte >= missing.size()) break;
-            if (missing[byte] & (1u << (i % 8))) emit(sock, c.last_reply[i].data(), c.last_reply[i].size(), c.addr, c.port);
+            if (missing[byte] & (1u << (i % 8))) {
+                emit(sock, c.last_reply[i].data(), c.last_reply[i].size(), c.addr, c.port);
+                if (c.last_reply.size() > 4) ::usleep(20000);
+            }
         }
     }
 
@@ -775,7 +781,10 @@ struct VfsHub {
 
     void on_request_frag(UdpSocket& sock, Conn& c, const FragView& frag) {
         if (c.have_last && frag.req == c.last_req) {
-            for (const auto& dg : c.last_reply) emit(sock, dg.data(), dg.size(), c.addr, c.port);
+            for (const auto& dg : c.last_reply) {
+            emit(sock, dg.data(), dg.size(), c.addr, c.port);
+            if (c.last_reply.size() > 4) ::usleep(20000);
+        }
             return;
         }
         if (c.in.n && frag.req == c.in.req) {
@@ -1381,13 +1390,14 @@ int udp_call(genesis_vfs* c, VfsBlob msg, VfsBlob& out, int timeout_ms) {
         if (!seal_dg(dg, c->conn, c->tx_seq++, c->tx, plain, 12 + len)) return GENESIS_ERR_CRYPTO;
         c->sock.send_to(dg.data(), dg.size(), c->peer, c->peer_port);
         dgs.push_back(std::move(dg));
+        if (frags > 4) ::usleep(8000);
     }
     Assembly box;
     box.req = msg.req_id;
     uint64_t deadline = monotonic_us() + static_cast<uint64_t>(timeout_ms) * 1000ull;
     uint64_t last_tx = monotonic_us();
     uint64_t hole_us = 0;
-    int backoff = 40;
+    int backoff = 800;
     while (monotonic_us() < deadline) {
         uint64_t now = monotonic_us();
         int left = static_cast<int>((deadline - now) / 1000);
@@ -1397,10 +1407,15 @@ int udp_call(genesis_vfs* c, VfsBlob msg, VfsBlob& out, int timeout_ms) {
         uint32_t addr = 0;
         uint16_t port = 0;
         int got = c->sock.recv_from(buf, sizeof(buf), &addr, &port, slice);
-        if (got > 0 && handle_udp(c, buf, static_cast<size_t>(got), &box, &dgs) && box.complete()) {
-            std::vector<uint8_t> raw = box.join();
-            if (!vfs_open_blob(raw.data(), raw.size(), out)) return GENESIS_ERR_PROTO;
-            return GENESIS_OK;
+        bool progressed = false;
+        if (got > 0) {
+            progressed = handle_udp(c, buf, static_cast<size_t>(got), &box, &dgs);
+            if (box.got) last_tx = monotonic_us();
+            if (progressed && box.complete()) {
+                std::vector<uint8_t> raw = box.join();
+                if (!vfs_open_blob(raw.data(), raw.size(), out)) return GENESIS_ERR_PROTO;
+                return GENESIS_OK;
+            }
         }
         now = monotonic_us();
         if (box.got && !box.complete() && now - hole_us > 15000) {
