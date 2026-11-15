@@ -5,6 +5,8 @@
 #include "log.hpp"
 #include "udp.hpp"
 #include "util.hpp"
+#include "nat.hpp"
+#include "nat_hub.hpp"
 #include "vfs_hub.hpp"
 #include "wire.hpp"
 
@@ -473,6 +475,7 @@ struct Node {
     genesis_stats last{};
     int ctrl_fd = -1;
     VfsHub* vfs = nullptr;
+    NatHub* nat = nullptr;
     bool oneshot = false;
     char oneshot_path[512]{};
     uint64_t ctrl_prog_us = 0;
@@ -510,7 +513,10 @@ Node* node_create(const genesis_config* cfg) {
     }
     if (cfg->pinned_core >= 0) pin_thread(cfg->pinned_core);
     n->vfs = vfs_hub_create(cfg);
-    if (!n->vfs) {
+    n->nat = nat_hub_create();
+    if (!n->vfs || !n->nat) {
+        vfs_hub_destroy(n->vfs);
+        nat_hub_destroy(n->nat);
         delete n;
         return nullptr;
     }
@@ -565,9 +571,11 @@ int node_poll(Node* n, int timeout_ms) {
     int got = 0;
     if (pr > 0 && (pf[0].revents & (POLLIN | POLLERR | POLLHUP)))
         got = n->sock.recv_from(buf, sizeof(buf), &addr, &port, 0);
-    bool vfs_pkt = got > 0 && vfs_is_packet(buf, static_cast<size_t>(got));
+    bool nat_pkt = got > 0 && nat_is(buf, static_cast<size_t>(got));
+    if (nat_pkt) nat_hub_packet(n->nat, n->sock, buf, static_cast<size_t>(got), addr, port);
+    bool vfs_pkt = got > 0 && !nat_pkt && vfs_is_packet(buf, static_cast<size_t>(got));
     if (vfs_pkt) vfs_hub_packet(n->vfs, n->sock, buf, static_cast<size_t>(got), addr, port);
-    if (got > 0 && !vfs_pkt) {
+    if (got > 0 && !vfs_pkt && !nat_pkt) {
         Session* s = find_session(n, 0);
         if (!s) {
             for (auto& slot : n->sessions) {
@@ -707,6 +715,7 @@ void node_destroy(Node* n) {
         if (s.io.f) std::fclose(s.io.f);
     }
     vfs_hub_destroy(n->vfs);
+    nat_hub_destroy(n->nat);
     delete n;
 }
 

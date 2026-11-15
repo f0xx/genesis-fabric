@@ -76,6 +76,16 @@ mount.genesis --ssh user@host --remote-export /home/user/photos photos /mnt/phot
 
 `export = name path [ro|rw]` in the daemon config publishes the same directory. `docs/VFS.md` is the full description.
 
+## NAT and a tunnel
+
+```sh
+genesis introduce -p 37420
+genesis path --via HOST:37420 --name laptop --peer artc0 --room lab --bench 4194304
+genesis tun --via HOST:37420 --name laptop --peer artc0 --room lab --tun gn0 --addr 10.88.73.1/30
+```
+
+`docs/NAT.md` covers the punch, the relay, the path report, and the proxy in front of `mount.genesis`.
+
 ## Discovery and STUN
 
 ```sh

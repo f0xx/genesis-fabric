@@ -36,6 +36,9 @@ void usage() {
                  "  genesis tree HOST[:PORT]:/EXPORT[/PATH]\n"
                  "  genesis vfs-serve [--export NAME=PATH[,ro]] [--control PATH]\n"
                  "  genesis mount [mount.genesis options] SPEC MOUNTPOINT\n"
+                 "  genesis introduce [-b HOST] [-p PORT]\n"
+                 "  genesis path --via HOST:PORT --name SELF [--peer PEER] [--room R] [--bench BYTES]\n"
+                 "  genesis tun --via HOST:PORT --name SELF --peer PEER [--tun DEV|--tap DEV] [--addr A.B.C.D/N]\n"
                  "  genesis version\n"
                  "Options:\n"
                  "  -c FILE          config file (key=value)\n"
@@ -539,6 +542,12 @@ int main(int argc, char** argv) {
                 std::strcmp(argv[i], "--fec") == 0 || std::strcmp(argv[i], "--nack") == 0 ||
                 std::strcmp(argv[i], "--jitter-ms") == 0 || std::strcmp(argv[i], "--via") == 0 ||
                 std::strcmp(argv[i], "--control") == 0 || std::strcmp(argv[i], "--export") == 0 ||
+                std::strcmp(argv[i], "--via") == 0 || std::strcmp(argv[i], "--room") == 0 ||
+                std::strcmp(argv[i], "--name") == 0 || std::strcmp(argv[i], "--peer") == 0 ||
+                std::strcmp(argv[i], "--bench") == 0 || std::strcmp(argv[i], "--punch-ms") == 0 ||
+                std::strcmp(argv[i], "--listen") == 0 || std::strcmp(argv[i], "--target") == 0 ||
+                std::strcmp(argv[i], "--tun") == 0 || std::strcmp(argv[i], "--tap") == 0 ||
+                std::strcmp(argv[i], "--addr") == 0 || std::strcmp(argv[i], "--mtu") == 0 ||
                 std::strcmp(argv[i], "-o") == 0 || std::strcmp(argv[i], "--output") == 0) {
                 ++i;
             }
@@ -726,6 +735,154 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (cmd == "mount") return exec_mount(argc, argv);
+    if (cmd == "introduce" || cmd == "path" || cmd == "tun") {
+        auto flag = [&](const char* key) {
+            for (int i = 2; i < argc; ++i)
+                if (std::strcmp(argv[i], key) == 0) return true;
+            return false;
+        };
+        auto val = [&](const char* key) -> const char* {
+            for (int i = 2; i + 1 < argc; ++i)
+                if (std::strcmp(argv[i], key) == 0) return argv[i + 1];
+            return nullptr;
+        };
+        if (cmd == "introduce") {
+            if (opt.port_set) opt.cfg.raw().bind_port = static_cast<uint16_t>(opt.peer_port);
+            std::signal(SIGINT, on_vfs_stop);
+            std::signal(SIGTERM, on_vfs_stop);
+            genesis_nat* nat = genesis_nat_serve(&opt.cfg.raw());
+            if (!nat) {
+                std::fprintf(stderr, "introduce failed to bind\n");
+                return 1;
+            }
+            std::fprintf(stderr, "introducer on port %u\n", genesis_nat_port(nat));
+            while (!g_vfs_stop) ::poll(nullptr, 0, 200);
+            genesis_nat_stop(nat);
+            return 0;
+        }
+        const char* via = val("--via");
+        const char* name = val("--name");
+        const char* peer = val("--peer");
+        const char* room = val("--room");
+        if (!room) room = "lab";
+        if (!via || !name) {
+            usage();
+            return 2;
+        }
+        std::string via_s = via;
+        auto colon = via_s.rfind(':');
+        if (colon == std::string::npos) {
+            usage();
+            return 2;
+        }
+        int via_port = std::atoi(via_s.c_str() + colon + 1);
+        via_s.resize(colon);
+        int punch_ms = val("--punch-ms") ? std::atoi(val("--punch-ms")) : 800;
+        int flags = flag("--relay") ? GENESIS_PATH_RELAY_ONLY : 0;
+        if (!peer || !peer[0]) flags |= GENESIS_PATH_ACCEPT;
+        genesis_path* path = genesis_path_open(&opt.cfg.raw(), via_s.c_str(), static_cast<uint16_t>(via_port), room, name,
+                                               peer, 8000, punch_ms, flags);
+        if (!path) {
+            std::fprintf(stderr, "path to %s failed\n", peer ? peer : via);
+            return 1;
+        }
+        auto show = [&](const genesis_path_report& r) {
+            auto ip = [](uint32_t a, uint16_t p, char* dst, size_t n) {
+                std::snprintf(dst, n, "%u.%u.%u.%u:%u", (a >> 24) & 255, (a >> 16) & 255, (a >> 8) & 255, a & 255, p);
+            };
+            char self[64], other[64], stun[64];
+            ip(r.self_addr, r.self_port, self, sizeof(self));
+            ip(r.peer_addr, r.peer_port, other, sizeof(other));
+            ip(r.stun_addr, r.stun_port, stun, sizeof(stun));
+            std::printf("mode %s\n", r.mode == 1 ? "direct" : "relay");
+            std::printf("self %s\npeer %s\nstun %s\n", self, other, r.stun_addr ? stun : "-");
+            std::printf("rtt_min_us %llu\nrtt_avg_us %llu\nrtt_max_us %llu\njitter_us %llu\n",
+                        static_cast<unsigned long long>(r.rtt_min_us), static_cast<unsigned long long>(r.rtt_avg_us),
+                        static_cast<unsigned long long>(r.rtt_max_us), static_cast<unsigned long long>(r.jitter_us));
+            std::printf("udp_payload %d\npath_mtu %d\n", r.udp_payload, r.path_mtu);
+            std::printf("punches_sent %d\npunches_got %d\n", r.punches_sent, r.punches_got);
+            std::printf("bench_bytes %llu\ngoodput_bps %llu\nelapsed_us %llu\n",
+                        static_cast<unsigned long long>(r.bench_bytes), static_cast<unsigned long long>(r.goodput_bps),
+                        static_cast<unsigned long long>(r.elapsed_us));
+            if (r.error[0]) std::printf("error %s\n", r.error);
+            std::fflush(stdout);
+        };
+        const char* bench_s = val("--bench");
+        if (bench_s) {
+            genesis_path_report report{};
+            unsigned long long nbytes = std::strtoull(bench_s, nullptr, 10);
+            int rc = genesis_path_bench(path, nbytes, &report);
+            show(report);
+            genesis_path_close(path);
+            return rc == GENESIS_OK ? 0 : 1;
+        }
+        if (cmd == "tun") {
+            genesis_path_report report{};
+            if (peer && peer[0] && genesis_path_measure(path, &report) == GENESIS_OK) show(report);
+            const char* dev = val("--tun");
+            int tap = 0;
+            if (!dev) {
+                dev = val("--tap");
+                tap = dev ? 1 : 0;
+            }
+            if (!dev) dev = tap ? "gt0" : "gn0";
+            int mtu = val("--mtu") ? std::atoi(val("--mtu")) : 0;
+            int rc = genesis_path_tun(path, dev, tap, val("--addr"), mtu);
+            if (rc != GENESIS_OK) {
+                std::fprintf(stderr, "tun device failed (%d). CAP_NET_ADMIN is required.\n", rc);
+                genesis_path_close(path);
+                return 1;
+            }
+            std::fprintf(stderr, "%s is up\n", dev);
+            std::signal(SIGINT, on_vfs_stop);
+            std::signal(SIGTERM, on_vfs_stop);
+            while (!g_vfs_stop) ::poll(nullptr, 0, 200);
+            genesis_path_close(path);
+            return 0;
+        }
+        const char* listen = val("--listen");
+        const char* target = val("--target");
+        if (listen || target) {
+            std::string th;
+            uint16_t tp = 0;
+            if (target) {
+                th = target;
+                auto c = th.rfind(':');
+                if (c == std::string::npos) {
+                    genesis_path_close(path);
+                    usage();
+                    return 2;
+                }
+                tp = static_cast<uint16_t>(std::atoi(th.c_str() + c + 1));
+                th.resize(c);
+            }
+            uint16_t lp = listen ? static_cast<uint16_t>(std::atoi(listen)) : 0;
+            if (genesis_path_proxy(path, "127.0.0.1", lp, target ? th.c_str() : nullptr, tp) != GENESIS_OK) {
+                std::fprintf(stderr, "proxy failed\n");
+                genesis_path_close(path);
+                return 1;
+            }
+            std::fprintf(stderr, "proxy listening on 127.0.0.1:%u\n", genesis_path_listen_port(path));
+            std::signal(SIGINT, on_vfs_stop);
+            std::signal(SIGTERM, on_vfs_stop);
+            while (!g_vfs_stop) ::poll(nullptr, 0, 200);
+            genesis_path_close(path);
+            return 0;
+        }
+        if (peer && peer[0]) {
+            genesis_path_report report{};
+            int rc = genesis_path_measure(path, &report);
+            show(report);
+            genesis_path_close(path);
+            return rc == GENESIS_OK ? 0 : 1;
+        }
+        std::fprintf(stderr, "registered %s in %s\n", name, room);
+        std::signal(SIGINT, on_vfs_stop);
+        std::signal(SIGTERM, on_vfs_stop);
+        while (!g_vfs_stop) ::poll(nullptr, 0, 200);
+        genesis_path_close(path);
+        return 0;
+    }
     usage();
     return 2;
 }

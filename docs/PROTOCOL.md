@@ -95,3 +95,7 @@ Discovery beacons are not part of the file connection. Magic `GDIS`, version 1, 
 ## VFS
 
 Type 14 is a request/response filesystem channel demuxed before the file engine. The record layout, the LZSS seal, and the fragment rules are in `docs/VFS.md`. This version's daemon takes type 14 off the socket before a file session is created. A daemon from before that demux can open an empty file session for the datagram and then ignore the unknown type. File-transfer hellos do not advertise bit 15, and a file transfer to an older peer does not send type 14.
+
+## NAT
+
+`GNAT` (`0x474E4154`), version 1, is a rendezvous header. Register, lookup, punch, relay, probe, bench, and tunnel frames are described in `docs/NAT.md`. The relay carries either `GNAT` or `GCX1` and nothing else. A socket that only understands `GCX1` does not parse it.

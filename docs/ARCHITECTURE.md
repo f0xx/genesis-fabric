@@ -13,6 +13,7 @@ The core is single-threaded. `Engine::start`, `tick`, `on_datagram`, and `pop` a
 - Mesh table. The metric is `rtt_us * 1000 / bw_kbps`. Gossip is a monotonic sequence plus the table. A direct observation is kept when a gossip advertisement is worse.
 - Discovery beacon magic `GDIS` on 239.255.42.19:37421. This is not SSDP and it does not map a port on the router. A trailer after the name lists filesystem exports. Older decoders ignore it.
 - VFS, frame type 14, is a sibling of the file engine on the same UDP socket. One handshake, then filesystem RPCs. `mount.genesis` is the FUSE client. The daemon and `genesis vfs-serve` are the servers. See `docs/VFS.md`.
+- NAT rendezvous uses a separate `GNAT` header on the same UDP socket. A world-reachable introducer exchanges reflexive addresses, the peers punch, and the introducer relays when the punch gets no answer. `genesis tun` carries IP or Ethernet over that path. See `docs/NAT.md`.
 - STUN Binding request, XOR-MAPPED-ADDRESS, MESSAGE-INTEGRITY (HMAC-SHA1), fingerprint. TURN Allocate is constructed. A full long-term TURN client is not finished.
 - SPSC ring for a streaming handoff. One producer, one consumer, power-of-two capacity.
 

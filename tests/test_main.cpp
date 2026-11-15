@@ -10,6 +10,7 @@
 #include "jitter.hpp"
 #include "link.hpp"
 #include "mesh.hpp"
+#include "nat.hpp"
 #include "ring.hpp"
 #include "stun.hpp"
 #include "util.hpp"
@@ -1057,6 +1058,56 @@ void test_vfs() {
     expect(std::system("rm -rf tmp/vfs_unit tmp/vfs_unit.sock") == 0, "remove vfs fixture");
 }
 
+void test_nat() {
+    genesis::NatMsg msg;
+    msg.type = genesis::kNatRelay;
+    std::snprintf(msg.room, sizeof(msg.room), "lab");
+    std::snprintf(msg.name, sizeof(msg.name), "a");
+    msg.cookie = 0x1122334455667788ull;
+    msg.data = {1, 2, 3, 4, 9};
+    uint8_t buf[256];
+    size_t n = genesis::nat_encode(buf, sizeof(buf), msg);
+    genesis::NatMsg back;
+    expect(n > 8 && genesis::nat_decode(buf, n, back) && back.cookie == msg.cookie && back.data == msg.data, "nat codec");
+
+    genesis_config cfg;
+    genesis_config_init(&cfg);
+    cfg.bind_port = 0;
+    cfg.enable_discovery = 0;
+    cfg.stun_host[0] = '\0';
+    std::snprintf(cfg.bind_host, sizeof(cfg.bind_host), "127.0.0.1");
+    genesis_nat* nat = genesis_nat_serve(&cfg);
+    expect(nat && genesis_nat_port(nat) != 0, "introducer");
+    if (!nat) return;
+    uint16_t port = genesis_nat_port(nat);
+    genesis_path* accept = genesis_path_open(&cfg, "127.0.0.1", port, "t", "aa", nullptr, 2000, 0, GENESIS_PATH_ACCEPT);
+    expect(accept != nullptr, "accept path");
+    genesis_path* client = accept ? genesis_path_open(&cfg, "127.0.0.1", port, "t", "bb", "aa", 2000, 500, 0) : nullptr;
+    expect(client != nullptr, "client path");
+    if (client) {
+        genesis_path_report report{};
+        expect(genesis_path_bench(client, 64 * 1024, &report) == GENESIS_OK, "direct bench");
+        expect(report.mode == 1 && report.punches_got > 0, "punched direct");
+        expect(report.bench_bytes == 64 * 1024 && report.goodput_bps > 0, "direct bytes");
+        expect(report.rtt_avg_us > 0 && report.udp_payload >= 1000, "rtt and mtu");
+        genesis_path_close(client);
+    }
+    if (accept) genesis_path_close(accept);
+
+    accept = genesis_path_open(&cfg, "127.0.0.1", port, "t", "cc", nullptr, 2000, 0,
+                               GENESIS_PATH_ACCEPT | GENESIS_PATH_RELAY_ONLY);
+    client = accept ? genesis_path_open(&cfg, "127.0.0.1", port, "t", "dd", "cc", 2000, 0, GENESIS_PATH_RELAY_ONLY) : nullptr;
+    expect(client != nullptr, "relay path");
+    if (client) {
+        genesis_path_report report{};
+        expect(genesis_path_bench(client, 32 * 1024, &report) == GENESIS_OK, "relay bench");
+        expect(report.mode == 2 && report.bench_bytes == 32 * 1024, "relay bytes");
+        genesis_path_close(client);
+    }
+    if (accept) genesis_path_close(accept);
+    genesis_nat_stop(nat);
+}
+
 }  // namespace
 
 int main() {
@@ -1076,6 +1127,7 @@ int main() {
     test_resume_and_control();
     test_fec_follows_wifi();
     test_vfs();
+    test_nat();
     if (g_fails) {
         std::fprintf(stderr, "%d failure(s)\n", g_fails);
         return 1;

@@ -14,7 +14,7 @@ extern "C" {
 #endif
 
 #define GENESIS_VERSION_MAJOR 1
-#define GENESIS_VERSION_MINOR 2
+#define GENESIS_VERSION_MINOR 3
 #define GENESIS_VERSION_PATCH 0
 
 #define GENESIS_PROTO_VERSION 1
@@ -349,6 +349,59 @@ void genesis_vfs_server_lose(genesis_vfs_server* server, int every);
  * host set: ask that node for its export table. Lines are "name rw|ro path". */
 int genesis_showmount(const genesis_config* cfg, const char* host, uint16_t port, int timeout_ms, char* out,
                       size_t out_cap);
+
+/* Rendezvous. An introducer on a world-reachable UDP port tells two peers each
+ * other's observed address. They punch that address, and if no answer comes
+ * back the same socket relays the datagrams. Old peers ignore the GNAT magic. */
+typedef struct genesis_nat genesis_nat;
+typedef struct genesis_path genesis_path;
+
+enum { GENESIS_PATH_RELAY_ONLY = 1, GENESIS_PATH_ACCEPT = 2 };
+
+typedef struct genesis_path_report {
+    int mode; /* 1 direct punch, 2 relay */
+    uint32_t self_addr;
+    uint16_t self_port;
+    uint32_t peer_addr;
+    uint16_t peer_port;
+    uint32_t stun_addr;
+    uint16_t stun_port;
+    uint64_t rtt_min_us;
+    uint64_t rtt_avg_us;
+    uint64_t rtt_max_us;
+    uint64_t jitter_us;
+    int udp_payload; /* largest probe payload that round-tripped */
+    int path_mtu;    /* udp_payload + 28, the IPv4 path MTU that implies */
+    uint64_t bench_bytes;
+    uint64_t goodput_bps;
+    uint64_t elapsed_us;
+    int punches_sent;
+    int punches_got;
+    char error[160];
+} genesis_path_report;
+
+genesis_nat* genesis_nat_serve(const genesis_config* cfg);
+uint16_t genesis_nat_port(const genesis_nat* nat);
+void genesis_nat_stop(genesis_nat* nat);
+
+/* flags: GENESIS_PATH_RELAY_ONLY skips the punch. GENESIS_PATH_ACCEPT registers
+ * and returns without looking a peer up; the first peer to send is accepted.
+ * punch_ms is how long a named peer is punched before the relay is used. */
+genesis_path* genesis_path_open(const genesis_config* cfg, const char* via_host, uint16_t via_port, const char* room,
+                                const char* name, const char* peer, int timeout_ms, int punch_ms, int flags);
+int genesis_path_measure(genesis_path* path, genesis_path_report* report);
+int genesis_path_bench(genesis_path* path, uint64_t nbytes, genesis_path_report* report);
+/* listen_port 0 picks an ephemeral port on listen_host. target_host NULL means
+ * datagrams from a local client are forwarded to the peer and replies return
+ * to that client. A target forwards peer datagrams at that UDP socket. */
+int genesis_path_proxy(genesis_path* path, const char* listen_host, uint16_t listen_port, const char* target_host,
+                       uint16_t target_port);
+uint16_t genesis_path_listen_port(const genesis_path* path);
+void genesis_path_status(const genesis_path* path, genesis_path_report* report);
+/* dev NULL lets the kernel name the interface. cidr is "a.b.c.d/prefix" or NULL.
+ * tap is 0 for TUN and 1 for TAP. The device disappears when the path is closed. */
+int genesis_path_tun(genesis_path* path, const char* dev, int tap, const char* cidr, int mtu);
+void genesis_path_close(genesis_path* path);
 
 #ifdef __cplusplus
 }

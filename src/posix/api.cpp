@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <cstring>
 
-const char* genesis_version(void) { return "1.2.0"; }
+const char* genesis_version(void) { return "1.3.0"; }
 
 void genesis_log_syslog(int on) { genesis::log_use_syslog(on); }
 

@@ -58,3 +58,4 @@ Progress (bar, percent, rate, ETA) is written to stderr. A config file is `-c pa
 - `docs/EMBEDDED.md`
 - `docs/USAGE.md`
 - `docs/VFS.md`
+- `docs/NAT.md`

@@ -61,6 +61,7 @@ set(GENESIS_CORE_SOURCES
     src/core/log.cpp
     src/core/md5.cpp
     src/core/mesh.cpp
+    src/core/nat.cpp
     src/core/sha1.cpp
     src/core/sha256.cpp
     src/core/stun.cpp
@@ -74,6 +75,7 @@ set(GENESIS_CORE_SOURCES
     src/posix/control.cpp
     src/posix/udp.cpp
     src/posix/vfs.cpp
+    src/posix/nat.cpp
 )
 
 add_library(genesis_core SHARED ${GENESIS_CORE_SOURCES})
@@ -101,6 +103,7 @@ add_library(genesis_core_embedded STATIC
     src/core/log.cpp
     src/core/md5.cpp
     src/core/mesh.cpp
+    src/core/nat.cpp
     src/core/sha1.cpp
     src/core/sha256.cpp
     src/core/stun.cpp
