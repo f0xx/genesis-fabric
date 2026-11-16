@@ -12,8 +12,8 @@ genesis recv -c /etc/genesis/genesis.conf -o /tmp/incoming.bin
 ## Sender
 
 ```sh
-genesis send -p 37420 ./clip.bin 192.168.4.100
-genesis send ./clip.bin 192.168.4.100:37420
+genesis send -p 37420 ./clip.bin 192.0.2.20
+genesis send ./clip.bin 192.0.2.20:37420
 ```
 
 The sender binds an ephemeral port unless `--listen` is set. `-p` is the peer port.
@@ -23,8 +23,8 @@ stderr shows a bar, the percent, the amount, the recent rate, and the ETA. The s
 ## SSH control plane
 
 ```sh
-genesis send --ssh foxx@euphoria --ssh-port 222 \
-  --remote-bin /home/foxx/repos/My\ Projects/genesis_codes_ai_assessment/build-rel/genesis \
+genesis send --ssh user@host.example --ssh-port 22 \
+  --remote-bin /opt/genesis/bin/genesis \
   ./clip.bin clip.bin
 ```
 
@@ -59,7 +59,7 @@ A partial destination is continued when `FILE.genesis` names the same source fil
 ```sh
 genesisd --control /tmp/genesis.sock -p 37420 --recv-dir /tmp/in
 genesis --control /tmp/genesis.sock recv -o /tmp/in/clip.bin -p 37420
-genesis --control /tmp/genesis.sock send -p 37420 ./clip.bin 192.168.4.100
+genesis --control /tmp/genesis.sock send -p 37420 ./clip.bin 192.0.2.20
 ```
 
 Without `--control`, `send` and `recv` call the library in this process. `--ssh` stays on that path.
@@ -67,11 +67,11 @@ Without `--control`, `send` and `recv` call the library in this process. `--ssh`
 ## Filesystem exports
 
 ```sh
-genesis vfs-serve -p 37420 --export "photos=/home/foxx/photos,rw"
-genesis showmount 192.168.4.100:37420
-mount.genesis 192.168.4.100:37420:/photos /mnt/photos
+genesis vfs-serve -p 37420 --export "photos=/srv/exports/photos,rw"
+genesis showmount 192.0.2.20:37420
+mount.genesis 192.0.2.20:37420:/photos /mnt/photos
 mount.genesis --control /tmp/genesis.sock photos /mnt/photos
-mount.genesis --ssh user@host --remote-export /home/user/photos photos /mnt/photos
+mount.genesis --ssh user@host.example --remote-export /srv/exports/photos photos /mnt/photos
 ```
 
 `export = name path [ro|rw]` in the daemon config publishes the same directory. `docs/VFS.md` is the full description.
@@ -80,8 +80,8 @@ mount.genesis --ssh user@host --remote-export /home/user/photos photos /mnt/phot
 
 ```sh
 genesis introduce -p 37420
-genesis path --via HOST:37420 --name laptop --peer artc0 --room lab --bench 4194304
-genesis tun --via HOST:37420 --name laptop --peer artc0 --room lab --tun gn0 --addr 10.88.73.1/30
+genesis path --via 203.0.113.10:37420 --name node-b --peer node-a --room lab --bench 4194304
+genesis tun --via 203.0.113.10:37420 --name node-b --peer node-a --room lab --tun gn0 --addr 198.51.100.1/30
 ```
 
 `docs/NAT.md` covers the punch, the relay, the path report, and the proxy in front of `mount.genesis`.

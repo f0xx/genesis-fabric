@@ -90,6 +90,8 @@ int main(int argc, char** argv) {
         ctrl = genesis_control_listen(control.c_str(), err, sizeof(err));
         if (ctrl < 0) {
             std::fprintf(stderr, "control: %s\n", err);
+            if (geteuid() != 0)
+                std::fprintf(stderr, "control: not root, so a socket in /run or a chroot cannot be set up\n");
             return 1;
         }
         std::fprintf(stderr, "control listening on %s\n", control.c_str());

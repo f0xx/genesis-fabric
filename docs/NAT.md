@@ -6,8 +6,8 @@ The punch and the relay use a header whose magic is `GNAT`, not `GCX1`. A file e
 
 ```sh
 genesis introduce -b 0.0.0.0 -p 37420
-genesis path --via 134.17.5.46:37420 --name artc0 --room lab
-genesis path --via 134.17.5.46:37420 --name laptop --peer artc0 --room lab --bench 4194304
+genesis path --via 203.0.113.10:37420 --name node-a --room lab
+genesis path --via 203.0.113.10:37420 --name node-b --peer node-a --room lab --bench 4194304
 ```
 
 The report is RTT min/avg/max, jitter, the largest UDP payload that round-tripped, the IPv4 MTU that payload implies, punch counts, and goodput in bits per second. `mode direct` means the punch opened a mapping. `mode relay` means the datagrams still cross the introducer. `--relay` skips the punch. STUN, when it answers, is printed next to the reflexive address the introducer observed. A keepalive registration keeps the same cookie, so the return path stays valid.
@@ -16,8 +16,8 @@ The report is RTT min/avg/max, jitter, the largest UDP payload that round-trippe
 
 ```sh
 genesis vfs-serve -b 127.0.0.1 -p 44000 --export box=/srv/export
-genesis path --via 10.7.0.10:37420 --name artc0 --room lab --target 127.0.0.1:44000
-genesis path --via 134.17.5.46:37420 --name laptop --peer artc0 --room lab --listen 45000
+genesis path --via 203.0.113.10:37420 --name node-a --room lab --target 127.0.0.1:44000
+genesis path --via 203.0.113.10:37420 --name node-b --peer node-a --room lab --listen 45000
 mount.genesis 127.0.0.1:45000:/box /mnt/lab
 ```
 

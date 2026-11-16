@@ -113,7 +113,7 @@ int genesis_control_listen(const char* spec, char* err, size_t err_cap) {
         addr.sun_family = AF_UNIX;
         std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
         if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || ::listen(fd, 4) != 0) {
-            seterr(std::strerror(errno));
+            if (err && err_cap) std::snprintf(err, err_cap, "%s: %s", path, std::strerror(errno));
             ::close(fd);
             return -1;
         }

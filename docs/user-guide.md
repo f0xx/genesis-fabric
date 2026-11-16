@@ -46,7 +46,7 @@ Without `--control`, `send` and `recv` call the library in this process. With `-
 ```sh
 genesisd --control /tmp/genesis.sock -p 37420 --recv-dir /tmp/in
 genesis --control /tmp/genesis.sock recv -o /tmp/in/file.bin -p 37420
-genesis --control /tmp/genesis.sock send -p 37420 ./file.bin 192.168.4.100
+genesis --control /tmp/genesis.sock send -p 37420 ./file.bin 192.0.2.20
 ```
 
 The spec is a filesystem path, `unix:/path`, or `host:port`. `recv` uses the daemon's UDP port. `send` opens its own socket in the daemon process. One control command runs at a time. `--ssh` stays in the local process.
@@ -100,10 +100,10 @@ Force a combination when comparing the path:
 
 ```sh
 genesis recv --fec off --nack off -o /tmp/out.bin -p 37420
-genesis send --fec off --nack off -p 37420 ./file.bin 192.168.4.100
+genesis send --fec off --nack off -p 37420 ./file.bin 192.0.2.20
 
 genesis recv --fec on --nack on --profile wifi -o /tmp/out.bin -p 37421
-genesis send --fec on --nack on --profile wifi -p 37421 ./file.bin 192.168.4.100
+genesis send --fec on --nack on --profile wifi -p 37421 ./file.bin 192.0.2.20
 ```
 
 The summary's wire byte count grows when parity or retransmission is doing work. Goodput is the payload rate.
@@ -111,8 +111,8 @@ The summary's wire byte count grows when parity or retransmission is doing work.
 ### Several paths
 
 ```sh
-genesis send --via 192.168.4.101:37420 --via 10.1.0.5:37420 \
-  -p 37420 ./file.bin 192.168.4.100
+genesis send --via 192.0.2.21:37420 --via 198.51.100.5:37420 \
+  -p 37420 ./file.bin 192.0.2.20
 ```
 
 Groups are spread across the primary address and each `--via` target. After four failed sends on one path, that block moves to a path that is still answering. The file is reassembled by byte offset on the receiver, so the receiver is a single `genesis recv` or `genesisd` bound to `0.0.0.0` if more than one local address is in use. A path that fails three blocks is marked down. The transfer fails only after every path has exhausted retransmission.
@@ -122,8 +122,8 @@ Groups are spread across the primary address and each `--via` target. After four
 `genesisd` and an active transfer answer `GDHT` find-node queries on the same UDP socket.
 
 ```sh
-genesis dht 192.168.4.100
-genesis dht 192.168.4.100:37420 --timeout-ms 1500
+genesis dht 192.0.2.20
+genesis dht 192.0.2.20:37420 --timeout-ms 1500
 ```
 
 Each line is `near` or `far`, a 32-character node id, `address:port`, and `rtt_us`. Near means the RTT is under 30 ms or the id shares a long prefix with the requester. Far is the rest of the table. The table is 16 buckets of 8 nodes.
@@ -181,7 +181,7 @@ transfer_timeout_s = 0
 
 ### Init scripts
 
-`packaging/systemd/genesisd.service` is `Type=simple` and passes `--foreground`. `packaging/openrc/genesisd` uses `supervise-daemon` the same way. Installing the files does not enable the service.
+`packaging/systemd/genesisd.service` is `Type=simple` and passes `--foreground`. `packaging/openrc/genesisd` uses `supervise-daemon` the same way and starts the process as root, so `chroot_dir` and `drop_user` in the config still run after the sockets are bound. `command_user` in that script drops first: a control socket under `/run` then fails, the process exits, and the supervisor starts it again. Installing the files does not enable the service.
 
 An unprivileged process cannot chroot. The jail call returns an error instead of pretending the process is confined. Run the daemon as a dedicated user and point `recv_dir` at a directory that user owns.
 

@@ -19,7 +19,7 @@ cmake -S . -B build-asan -DGENESIS_SANITIZER=address
 cmake -S . -B build-tsan -DGENESIS_SANITIZER=thread -DGENESIS_IO_URING=OFF
 ```
 
-`-march=native` is off unless `-DGENESIS_NATIVE_ARCH=ON`, so a binary built here can be copied to another machine of the same ABI. CMake 3.16 is the minimum, which covers the Alpine host used in CI and on `artc0`.
+`-march=native` is off unless `-DGENESIS_NATIVE_ARCH=ON`, so a binary built here can be copied to another machine of the same ABI. CMake 3.16 is the minimum, which covers the Alpine image used in CI.
 
 `liburing` is optional. The data path uses `sendto` / `recvfrom`. A `sendmmsg` helper is in the socket class for bursts. io_uring is initialized when the library is present so the stats flag can report it; UDP reads are not issued with `readv`.
 
@@ -31,7 +31,7 @@ cmake -S . -B build-tsan -DGENESIS_SANITIZER=thread -DGENESIS_IO_URING=OFF
 
 ```sh
 genesis recv -o /tmp/out.bin -p 37420
-genesis send -p 37420 ./file.bin 192.168.4.100
+genesis send -p 37420 ./file.bin 192.0.2.20
 ```
 
 Progress (bar, percent, rate, ETA) is written to stderr. A config file is `-c path` with `key = value` lines. An interrupted receive continues from the last flushed chunk when the destination and its `.genesis` sidecar are still there. `--control PATH` or `--control HOST:PORT` sends that same `send` or `recv` to a running `genesisd` instead of calling the library. `export` lines publish directories, and `mount.genesis` mounts one over the same protocol. The operator manual is `docs/user-guide.md`. See also `config/genesis.conf.example`, `docs/USAGE.md`, and `docs/VFS.md`.
@@ -59,3 +59,4 @@ Progress (bar, percent, rate, ETA) is written to stderr. A config file is `-c pa
 - `docs/USAGE.md`
 - `docs/VFS.md`
 - `docs/NAT.md`
+- `docs/COMPARISON.md`

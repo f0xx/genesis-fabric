@@ -7,25 +7,25 @@ A genesis node can publish directories and a client can mount one. The file-tran
 ## Publish
 
 ```
-export = photos /home/foxx/photos rw
+export = photos /srv/exports/photos rw
 export = pub /srv/pub ro
 ```
 
-The same line is accepted as `photos=/home/foxx/photos,rw`. The name is at most 31 characters from `[A-Za-z0-9._+-]`. A path component `..` is rejected. Eight exports is the maximum. The default mode is read-write. A read-only export returns `EROFS` for anything that would change the tree.
+The same line is accepted as `photos=/srv/exports/photos,rw`. The name is at most 31 characters from `[A-Za-z0-9._+-]`. A path component `..` is rejected. Eight exports is the maximum. The default mode is read-write. A read-only export returns `EROFS` for anything that would change the tree.
 
 ```sh
 genesisd -c /etc/genesis/genesis.conf
-genesis vfs-serve -b 0.0.0.0 -p 37420 --export "photos=/home/foxx/photos"
+genesis vfs-serve -b 0.0.0.0 -p 37420 --export "photos=/srv/exports/photos"
 ```
 
 ## Find and mount
 
 ```sh
 genesis showmount
-genesis showmount 192.168.4.100:37420
-mount.genesis 192.168.4.100:37420:/photos /mnt/photos
-genesis mount -f 192.168.4.100:37420:/photos /mnt/photos
-genesis tree 192.168.4.100:37420:/photos
+genesis showmount 192.0.2.20:37420
+mount.genesis 192.0.2.20:37420:/photos /mnt/photos
+genesis mount -f 192.0.2.20:37420:/photos /mnt/photos
+genesis tree 192.0.2.20:37420:/photos
 ```
 
 `showmount` with no host listens for discovery beacons. A host asks that node for its table. Lines from a node are `name rw|ro path`. Beacon lines are `ip:port name export,export`.
@@ -46,7 +46,7 @@ SSH only starts the remote listener. The bytes go over UDP, the same way `genesi
 
 ```sh
 mount.genesis --ssh user@host --remote-bin ~/bin/genesis \
-  --remote-export /home/user/photos photos /mnt/photos
+  --remote-export /srv/exports/photos photos /mnt/photos
 ```
 
 The remote command is `genesis vfs-serve --ssh-pipe -p 0 --export photos='path'`. It prints `ready PORT` and exits when the SSH session closes. The export name and the SSH user and host are restricted to a shell-safe set. The directory is single-quoted.

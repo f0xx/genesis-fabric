@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="280" viewBox="0 0 920 280">
+  <rect width="920" height="280" fill="#f7f4ee"/>
+  <text x="24" y="34" font-family="Georgia, serif" font-size="20" fill="#1c1915">Lossless wire bytes per payload byte</text>
+  <text x="24" y="56" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#3d3832">Same 8 MiB object. Each parity datagram is sent twice, so the extra bytes track 2 times r/k.</text>
+  <g font-family="ui-sans-serif, sans-serif" font-size="13" fill="#1c1915">
+    <text x="24" y="100">FEC off, NACK off</text>
+    <rect x="210" y="84" width="340" height="20" fill="#1f6f5b"/>
+    <text x="558" y="99">1.06</text>
+    <text x="24" y="136">FEC off, NACK on</text>
+    <rect x="210" y="120" width="342" height="20" fill="#2f6f4e"/>
+    <text x="560" y="135">1.07</text>
+    <text x="24" y="172">k=8, r=1, parity twice</text>
+    <rect x="210" y="156" width="429" height="20" fill="#9a5520"/>
+    <text x="647" y="171">1.34</text>
+    <text x="24" y="208">k=8 r=2, or k=16 r=4</text>
+    <rect x="210" y="192" width="516" height="20" fill="#7a3e12"/>
+    <text x="734" y="207">1.61</text>
+    <text x="24" y="244" fill="#6b6258">1.00 would be the file alone. These bars are from the clean veth.</text>
+    <text x="24" y="264" fill="#6b6258">On the lossy path, retransmission moved the ratio to about 1.6-2.6.</text>
+  </g>
+</svg>

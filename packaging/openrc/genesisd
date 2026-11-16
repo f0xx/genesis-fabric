@@ -7,11 +7,20 @@ name="genesisd"
 description="Genesis Codes UDP transfer daemon"
 command="/usr/bin/genesisd"
 command_args="--foreground -c ${GENESIS_CONFIG:-/etc/genesis/genesis.conf}"
-command_user="${GENESIS_USER:-genesis}:${GENESIS_GROUP:-genesis}"
 supervisor="supervise-daemon"
 pidfile="/run/genesisd.pid"
 respawn_delay=2
 respawn_max=5
+
+# Stay root across exec. genesisd binds the control socket and the UDP port
+# first, then applies chroot_dir and drop_user from the config. command_user
+# would drop before that. A socket in /run is then "Permission denied", the
+# process exits 1, and supervise-daemon starts it again. Set GENESIS_USER only
+# when the config does not chroot and the control socket lives in a directory
+# that user can create.
+if [ -n "${GENESIS_USER:-}" ]; then
+    command_user="${GENESIS_USER}:${GENESIS_GROUP:-${GENESIS_USER}}"
+fi
 
 depend() {
     need net

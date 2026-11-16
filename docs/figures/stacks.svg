@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="310" viewBox="0 0 920 310">
+  <rect width="920" height="310" fill="#f7f4ee"/>
+  <text x="24" y="36" font-family="Georgia, serif" font-size="20" fill="#1c1915">What each protocol actually carries</text>
+  <g font-family="ui-sans-serif, sans-serif" font-size="13" fill="#1c1915">
+    <g transform="translate(24,64)">
+      <text x="0" y="0" font-weight="700">Genesis</text>
+      <rect x="0" y="12" width="160" height="36" fill="#1f6f5b"/>
+      <text x="10" y="35" fill="#f7f4ee">file, VFS, TUN frame</text>
+      <rect x="0" y="48" width="160" height="36" fill="#2f6f4e"/>
+      <text x="10" y="71" fill="#f7f4ee">FEC, NACK, SACK, BBR</text>
+      <rect x="0" y="84" width="160" height="36" fill="#3d5c4a"/>
+      <text x="10" y="107" fill="#f7f4ee">X25519 + ChaCha20</text>
+      <rect x="0" y="120" width="160" height="28" fill="#c8bfb0"/>
+      <text x="10" y="139">UDP</text>
+    </g>
+    <g transform="translate(208,64)">
+      <text x="0" y="0" font-weight="700">QUIC</text>
+      <rect x="0" y="12" width="160" height="36" fill="#1f4e79"/>
+      <text x="10" y="35" fill="#f7f4ee">HTTP/3 or streams</text>
+      <rect x="0" y="48" width="160" height="36" fill="#2a6294"/>
+      <text x="10" y="71" fill="#f7f4ee">ACK ranges, Cubic/BBR</text>
+      <rect x="0" y="84" width="160" height="36" fill="#3d5c4a"/>
+      <text x="10" y="107" fill="#f7f4ee">TLS 1.3</text>
+      <rect x="0" y="120" width="160" height="28" fill="#c8bfb0"/>
+      <text x="10" y="139">UDP</text>
+    </g>
+    <g transform="translate(392,64)">
+      <text x="0" y="0" font-weight="700">WebRTC</text>
+      <rect x="0" y="12" width="160" height="28" fill="#7a3e12"/>
+      <text x="10" y="31" fill="#f7f4ee">media or data</text>
+      <rect x="0" y="40" width="160" height="28" fill="#9a5520"/>
+      <text x="10" y="59" fill="#f7f4ee">NACK, FEC, GCC</text>
+      <rect x="0" y="68" width="160" height="28" fill="#3d5c4a"/>
+      <text x="10" y="87" fill="#f7f4ee">DTLS / SRTP</text>
+      <rect x="0" y="96" width="160" height="28" fill="#6b6258"/>
+      <text x="10" y="115" fill="#f7f4ee">ICE</text>
+      <rect x="0" y="124" width="160" height="24" fill="#c8bfb0"/>
+      <text x="10" y="141">UDP</text>
+    </g>
+    <g transform="translate(576,64)">
+      <text x="0" y="0" font-weight="700">WireGuard</text>
+      <rect x="0" y="12" width="160" height="48" fill="#1f6f5b"/>
+      <text x="10" y="41" fill="#f7f4ee">IP packet</text>
+      <rect x="0" y="60" width="160" height="48" fill="#3d5c4a"/>
+      <text x="10" y="89" fill="#f7f4ee">Noise, ChaCha20</text>
+      <rect x="0" y="108" width="160" height="40" fill="#c8bfb0"/>
+      <text x="10" y="133">UDP</text>
+    </g>
+    <g transform="translate(760,64)">
+      <text x="0" y="0" font-weight="700">KCP</text>
+      <rect x="0" y="12" width="136" height="48" fill="#5c4a2a"/>
+      <text x="10" y="41" fill="#f7f4ee">your bytes</text>
+      <rect x="0" y="60" width="136" height="48" fill="#7a6230"/>
+      <text x="10" y="89" fill="#f7f4ee">ARQ only</text>
+      <rect x="0" y="108" width="136" height="40" fill="#c8bfb0"/>
+      <text x="10" y="133" fill="#1c1915">your UDP</text>
+    </g>
+  </g>
+  <text x="24" y="248" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#3d3832">Green is confidentiality. Blue is a recovered stream. Brown is media repair.</text>
+  <text x="24" y="268" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#3d3832">KCP stops at retransmission. Encryption, FEC, and the socket belong to the application.</text>
+  <text x="24" y="294" font-family="ui-sans-serif, sans-serif" font-size="12" fill="#6b6258">Heights are roles, not byte overhead. Overhead is in the matrix.</text>
+</svg>

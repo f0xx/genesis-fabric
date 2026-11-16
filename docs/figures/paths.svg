@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="360" viewBox="0 0 920 360">
+  <rect width="920" height="360" fill="#f7f4ee"/>
+  <text x="24" y="34" font-family="Georgia, serif" font-size="20" fill="#1c1915">How a new network path is opened</text>
+  <g font-family="ui-sans-serif, sans-serif" font-size="13" fill="#1c1915">
+    <g transform="translate(24,58)">
+      <text font-weight="700">Genesis punch, then relay</text>
+      <rect x="0" y="16" width="78" height="36" rx="4" fill="#1f6f5b"/>
+      <text x="16" y="39" fill="#f7f4ee">peer A</text>
+      <rect x="250" y="16" width="110" height="36" rx="4" fill="#6b6258"/>
+      <text x="262" y="39" fill="#f7f4ee">introducer</text>
+      <rect x="430" y="16" width="78" height="36" rx="4" fill="#1f6f5b"/>
+      <text x="446" y="39" fill="#f7f4ee">peer B</text>
+      <path d="M78 28 H250" stroke="#1c1915" fill="none"/>
+      <path d="M360 28 H430" stroke="#1c1915" fill="none"/>
+      <text x="0" y="78">1. Both register. Each learns the address the introducer saw.</text>
+      <text x="0" y="98">2. Both send a punch at that address.</text>
+      <text x="0" y="118">3. A punch answer means later datagrams go direct.</text>
+      <text x="0" y="138">4. No answer: the introducer forwards GNAT or GCX1 only,</text>
+      <text x="14" y="156">and only between two live names in the same room.</text>
+    </g>
+    <g transform="translate(540,58)">
+      <text font-weight="700">QUIC migration</text>
+      <rect x="0" y="16" width="78" height="36" rx="4" fill="#1f4e79"/>
+      <text x="14" y="39" fill="#f7f4ee">client</text>
+      <rect x="200" y="16" width="86" height="36" rx="4" fill="#1f4e79"/>
+      <text x="214" y="39" fill="#f7f4ee">server</text>
+      <path d="M78 34 H200" stroke="#1c1915" fill="none"/>
+      <text x="0" y="78">The server is already reachable.</text>
+      <text x="0" y="98">A client may move to a new address.</text>
+      <text x="0" y="118">Connection IDs keep the session.</text>
+      <text x="0" y="138">PATH_CHALLENGE checks the new path.</text>
+      <text x="0" y="158">There is no peer-to-peer punch.</text>
+      <text x="0" y="196" font-weight="700">WireGuard</text>
+      <text x="0" y="216">The latest authenticated source</text>
+      <text x="0" y="234">becomes the peer endpoint.</text>
+      <text x="0" y="252">A keepalive holds a mapping open.</text>
+      <text x="0" y="270">It does not discover a hidden peer.</text>
+    </g>
+  </g>
+</svg>
