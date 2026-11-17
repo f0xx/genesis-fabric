@@ -10,6 +10,7 @@
 #include "vfs_hub.hpp"
 #include "wire.hpp"
 
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -469,7 +470,8 @@ struct Node {
     genesis_config cfg{};
     UdpSocket sock;
     UdpSocket disco;
-    bool stop = false;
+    /* Written by genesis_node_request_stop from a thread that is not polling. */
+    std::atomic<bool> stop{false};
     Session sessions[4];
     uint64_t last_beacon = 0;
     genesis_stats last{};
@@ -534,7 +536,7 @@ void finish_control(Node* n, Session& s);
 
 int node_poll(Node* n, int timeout_ms) {
     if (!n) return GENESIS_ERR_ARGS;
-    if (n->stop) return 0;
+    if (n->stop.load(std::memory_order_acquire)) return 0;
     uint64_t now = monotonic_us();
     if (n->cfg.enable_discovery && now - n->last_beacon > 2000000) {
         Beacon b;
@@ -705,7 +707,7 @@ int node_arm_recv(Node* n, int client_fd, const char* path, const genesis_config
 }
 
 void node_stop(Node* n) {
-    if (n) n->stop = true;
+    if (n) n->stop.store(true, std::memory_order_release);
 }
 
 void node_destroy(Node* n) {
